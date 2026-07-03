@@ -92,7 +92,8 @@ the first write whose value starts `99 aa 00 2e ff 88 1f 00 00 00 01`).
 The repo doubles as a HACS custom repository: the
 [`custom_components/xyaoled`](custom_components/xyaoled) integration exposes the panel
 in Home Assistant as a light (power/brightness), a clear-screen button, a notify
-entity, and `xyaoled.display_text` / `display_image` / `display_pixel_art` services.
+entity, a clock switch, a preview image entity, and `xyaoled.display_text` /
+`display_image` / `display_pixel_art` services.
 It works with a local Bluetooth adapter or ESPHome Bluetooth proxies and auto-discovers
 the panel. See [docs/home_assistant.md](docs/home_assistant.md) for install and
 automation examples.

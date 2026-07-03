@@ -6,10 +6,22 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, Platform
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_INIT_HEX
+from .const import (
+    CONF_INIT_HEX,
+    CONF_NOTIFY_COLOR,
+    CONF_NOTIFY_SPEED,
+    DEFAULT_COLOR,
+    DEFAULT_SPEED,
+)
 from .device import XyaoLedPanel
 
-PLATFORMS = [Platform.BUTTON, Platform.LIGHT, Platform.NOTIFY]
+PLATFORMS = [
+    Platform.BUTTON,
+    Platform.IMAGE,
+    Platform.LIGHT,
+    Platform.NOTIFY,
+    Platform.SWITCH,
+]
 
 XyaoLedConfigEntry = ConfigEntry[XyaoLedPanel]
 
@@ -20,6 +32,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: XyaoLedConfigEntry) -> b
         entry.data[CONF_ADDRESS],
         entry.options.get(CONF_INIT_HEX) or None,
     )
+    panel.default_color = tuple(entry.options.get(CONF_NOTIFY_COLOR, DEFAULT_COLOR))
+    panel.default_speed = int(entry.options.get(CONF_NOTIFY_SPEED, DEFAULT_SPEED))
     entry.runtime_data = panel
     # Keep entity availability current: advertisements mark the panel present,
     # the unavailable tracker marks it gone once its address stops advertising.

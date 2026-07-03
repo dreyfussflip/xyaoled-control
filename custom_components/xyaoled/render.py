@@ -237,3 +237,34 @@ def make_gif(path: str, fit: str = "contain") -> tuple[bytes, int]:
     data = bytearray(buf.getvalue())
     data[:6] = b"GIF89a"
     return bytes(data), len(pal)
+
+
+# ---------------------------------------------------- preview PNGs (image entity)
+
+PREVIEW_SCALE = 8  # 64x16 -> 512x128; nearest neighbour keeps the LED look
+
+
+def _to_png(img: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    img.resize((W * PREVIEW_SCALE, H * PREVIEW_SCALE), Image.NEAREST).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def preview_png(grid: list[list[int]], rgb: tuple[int, int, int]) -> bytes:
+    """Render a mono grid as an upscaled PNG for the HA preview entity."""
+    img = Image.new("RGB", (W, H), (0, 0, 0))
+    px = img.load()
+    for r in range(H):
+        for c in range(W):
+            if grid[r][c]:
+                px[c, r] = tuple(rgb)
+    return _to_png(img)
+
+
+def preview_png_from_gif(gif: bytes) -> bytes:
+    """First frame of a device GIF payload as an upscaled PNG."""
+    return _to_png(Image.open(io.BytesIO(gif)).convert("RGB"))
+
+
+def blank_preview_png() -> bytes:
+    return preview_png(blank_grid(), (0, 0, 0))

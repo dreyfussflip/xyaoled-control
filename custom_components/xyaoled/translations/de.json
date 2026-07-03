@@ -22,6 +22,8 @@
       "init": {
         "description": "Falls dein Panel Befehle ignoriert (der mitgelieferte Handshake wird abgelehnt), zeichne deinen eigenen Init-Frame aus der offiziellen App auf und füge ihn hier als Hex ein. Siehe PROTOCOL.md im Repository.",
         "data": {
+          "notify_color": "Standardfarbe (Benachrichtigungen & Uhr)",
+          "notify_speed": "Standard-Geschwindigkeit (Benachrichtigungen & Uhr)",
           "init_hex": "Init-Frame (Hex, optional)"
         }
       }
@@ -40,6 +42,16 @@
     "notify": {
       "panel": {
         "name": "Panel"
+      }
+    },
+    "switch": {
+      "clock": {
+        "name": "Uhr"
+      }
+    },
+    "image": {
+      "preview": {
+        "name": "Vorschau"
       }
     }
   },

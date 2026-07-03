@@ -6,7 +6,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import XyaoLedConfigEntry
-from .const import DEFAULT_COLOR
 from .entity import XyaoLedEntity
 
 
@@ -27,4 +26,6 @@ class XyaoLedNotify(XyaoLedEntity, NotifyEntity):
 
     async def async_send_message(self, message: str, title: str | None = None) -> None:
         text = f"{title}: {message}" if title else message
-        await self._panel.display_text(text, DEFAULT_COLOR)
+        await self._panel.display_text(
+            text, self._panel.default_color, speed=self._panel.default_speed
+        )

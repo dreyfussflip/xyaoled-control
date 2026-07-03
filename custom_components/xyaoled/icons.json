@@ -9,6 +9,19 @@
       "panel": {
         "default": "mdi:message-text-outline"
       }
+    },
+    "switch": {
+      "clock": {
+        "default": "mdi:clock-outline",
+        "state": {
+          "on": "mdi:clock-digital"
+        }
+      }
+    },
+    "image": {
+      "preview": {
+        "default": "mdi:monitor-screenshot"
+      }
     }
   },
   "services": {

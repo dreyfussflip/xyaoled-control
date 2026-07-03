@@ -1,11 +1,36 @@
-"""Rendering tests (Pillow only): text grids and GIF re-encoding."""
+"""Rendering tests (Pillow only): text grids, GIF re-encoding, HA previews."""
+import importlib.util
 import io
+import os
+import sys
+import types
 
 from PIL import Image
 
 from xyaoled import text
 from xyaoled.core import H, W
 from xyaoled.gif import make_gif
+
+
+def _load_ha_render():
+    """Load the vendored HA render module without importing homeassistant."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pkg = types.ModuleType("_vend")
+    pkg.__path__ = [os.path.join(root, "custom_components", "xyaoled")]
+    sys.modules.setdefault("_vend", pkg)
+    for name in ("protocol", "render"):
+        if f"_vend.{name}" not in sys.modules:
+            spec = importlib.util.spec_from_file_location(
+                f"_vend.{name}",
+                os.path.join(root, "custom_components", "xyaoled", f"{name}.py"),
+            )
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[f"_vend.{name}"] = mod
+            spec.loader.exec_module(mod)
+    return sys.modules["_vend.render"]
+
+
+ha_render = _load_ha_render()
 
 
 def lit(grid):
@@ -58,3 +83,29 @@ def test_make_gif_animation_keeps_durations(tmp_path):
         out.seek(i)
         durs.append(out.info.get("duration"))
     assert durs == [100, 200, 300]
+
+
+# ------------------------------------------------------------ HA preview images
+
+def test_preview_png_scales_and_colours():
+    grid = [[0] * W for _ in range(H)]
+    grid[0][0] = 1
+    png = ha_render.preview_png(grid, (0, 255, 0))
+    img = Image.open(io.BytesIO(png))
+    s = ha_render.PREVIEW_SCALE
+    assert img.size == (W * s, H * s)
+    assert img.getpixel((0, 0)) == (0, 255, 0)          # lit pixel, upscaled
+    assert img.getpixel((s, 0)) == (0, 0, 0)            # neighbour stays dark
+
+
+def test_preview_png_from_gif():
+    buf = io.BytesIO()
+    Image.new("RGB", (W, H), (10, 20, 30)).save(buf, format="GIF")
+    png = ha_render.preview_png_from_gif(buf.getvalue())
+    img = Image.open(io.BytesIO(png))
+    assert img.size == (W * ha_render.PREVIEW_SCALE, H * ha_render.PREVIEW_SCALE)
+
+
+def test_blank_preview_is_black():
+    img = Image.open(io.BytesIO(ha_render.blank_preview_png()))
+    assert img.convert("RGB").getpixel((5, 5)) == (0, 0, 0)

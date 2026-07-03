@@ -17,8 +17,21 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    ColorRGBSelector,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
-from .const import CONF_INIT_HEX, DOMAIN
+from .const import (
+    CONF_INIT_HEX,
+    CONF_NOTIFY_COLOR,
+    CONF_NOTIFY_SPEED,
+    DEFAULT_COLOR,
+    DEFAULT_SPEED,
+    DOMAIN,
+)
 from .protocol import NAME_PREFIX, validate_init
 
 
@@ -95,40 +108,72 @@ class XyaoLedConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class XyaoLedOptionsFlow(OptionsFlow):
-    """Options: a device-specific captured init frame (see PROTOCOL.md)."""
+    """Options: notify/clock defaults and a device-specific init frame."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
             init_hex = user_input.get(CONF_INIT_HEX, "").strip().lower().replace(" ", "")
+            error = None
             if init_hex:
                 try:
-                    data = bytes.fromhex(init_hex)
+                    validate_init(bytes.fromhex(init_hex))
                 except ValueError:
-                    return self.async_show_form(
-                        step_id="init",
-                        data_schema=self._schema(init_hex),
-                        errors={CONF_INIT_HEX: "invalid_hex"},
-                    )
-                try:
-                    validate_init(data)
-                except ValueError:
-                    return self.async_show_form(
-                        step_id="init",
-                        data_schema=self._schema(init_hex),
-                        errors={CONF_INIT_HEX: "invalid_init"},
-                    )
-            return self.async_create_entry(data={CONF_INIT_HEX: init_hex})
+                    error = "invalid_hex" if _not_hex(init_hex) else "invalid_init"
+            if error:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=self._schema({**user_input, CONF_INIT_HEX: init_hex}),
+                    errors={CONF_INIT_HEX: error},
+                )
+            return self.async_create_entry(
+                data={
+                    CONF_INIT_HEX: init_hex,
+                    CONF_NOTIFY_COLOR: list(
+                        user_input.get(CONF_NOTIFY_COLOR, list(DEFAULT_COLOR))
+                    ),
+                    CONF_NOTIFY_SPEED: int(
+                        user_input.get(CONF_NOTIFY_SPEED, DEFAULT_SPEED)
+                    ),
+                }
+            )
 
+        opts = self.config_entry.options
         return self.async_show_form(
             step_id="init",
             data_schema=self._schema(
-                self.config_entry.options.get(CONF_INIT_HEX, "")
+                {
+                    CONF_INIT_HEX: opts.get(CONF_INIT_HEX, ""),
+                    CONF_NOTIFY_COLOR: opts.get(CONF_NOTIFY_COLOR, list(DEFAULT_COLOR)),
+                    CONF_NOTIFY_SPEED: opts.get(CONF_NOTIFY_SPEED, DEFAULT_SPEED),
+                }
             ),
         )
 
-    def _schema(self, current: str) -> vol.Schema:
+    def _schema(self, current: dict[str, Any]) -> vol.Schema:
         return vol.Schema(
-            {vol.Optional(CONF_INIT_HEX, default=current): str}
+            {
+                vol.Optional(
+                    CONF_NOTIFY_COLOR,
+                    default=current.get(CONF_NOTIFY_COLOR, list(DEFAULT_COLOR)),
+                ): ColorRGBSelector(),
+                vol.Optional(
+                    CONF_NOTIFY_SPEED,
+                    default=current.get(CONF_NOTIFY_SPEED, DEFAULT_SPEED),
+                ): NumberSelector(
+                    NumberSelectorConfig(min=1, max=255, mode=NumberSelectorMode.SLIDER)
+                ),
+                vol.Optional(
+                    CONF_INIT_HEX, default=current.get(CONF_INIT_HEX, "")
+                ): str,
+            }
         )
+
+
+def _not_hex(s: str) -> bool:
+    try:
+        bytes.fromhex(s)
+        return False
+    except ValueError:
+        return True

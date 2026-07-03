@@ -8,9 +8,16 @@ as a device with:
 - a **button** entity — clear the screen and the on-device playlist,
 - a **notify** entity — `notify.send_message` shows the message as text on the panel
   (auto-scrolls when it is wider than 64px),
+- a **switch** entity ("Clock") — while on, the panel shows the current time,
+  updated every minute; survives Home Assistant restarts,
+- an **image** entity ("Preview") — an upscaled picture of whatever was last sent
+  to the panel, handy on dashboards,
 - three services: `xyaoled.display_text`, `xyaoled.display_image` (full colour,
   animated GIFs supported), `xyaoled.display_pixel_art` (built-in patterns or 1-bit
   images in any colour).
+
+The **options** (gear icon on the integration) hold the default colour and speed
+used by the notify entity and the clock, plus the captured init frame (below).
 
 It uses Home Assistant's Bluetooth stack, so it works with a local adapter **or any
 ESPHome Bluetooth proxy**. Requires Home Assistant 2024.11 or newer.

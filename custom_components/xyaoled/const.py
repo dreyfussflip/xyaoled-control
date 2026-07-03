@@ -3,6 +3,8 @@
 DOMAIN = "xyaoled"
 
 CONF_INIT_HEX = "init_hex"
+CONF_NOTIFY_COLOR = "notify_color"
+CONF_NOTIFY_SPEED = "notify_speed"
 
 DEFAULT_COLOR = (255, 0, 0)
 DEFAULT_TEXT_SIZE = 14

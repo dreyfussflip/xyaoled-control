@@ -12,9 +12,11 @@ from bleak_retry_connector import BleakClientWithServiceCache, establish_connect
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import dt as dt_util
 
 from . import protocol, render
 from .const import (
+    DEFAULT_COLOR,
     DEFAULT_SPEED,
     MODE_AUTO,
     MODE_PAGES,
@@ -57,6 +59,14 @@ class XyaoLedPanel:
         self._listeners: list[Callable[[], None]] = []
         self._last_available: bool | None = None
 
+        # Configurable defaults (options flow) used by notify and the clock.
+        self.default_color: tuple[int, int, int] = DEFAULT_COLOR
+        self.default_speed: int = DEFAULT_SPEED
+
+        # Upscaled PNG of the last content sent, shown by the image entity.
+        self.preview: bytes | None = None
+        self.preview_updated = None
+
         # Set from device notifications so we can wait on them instead of sleeping.
         self._handshaked = asyncio.Event()
         self._image_done = asyncio.Event()
@@ -74,6 +84,11 @@ class XyaoLedPanel:
     def _fire(self) -> None:
         for cb in self._listeners:
             cb()
+
+    def _set_preview(self, png: bytes) -> None:
+        self.preview = png
+        self.preview_updated = dt_util.utcnow()
+        self._fire()
 
     @property
     def available(self) -> bool:
@@ -248,6 +263,7 @@ class XyaoLedPanel:
 
     async def clear(self) -> None:
         await self._execute([], clear_first=True)
+        self._set_preview(await self._hass.async_add_executor_job(render.blank_preview_png))
 
     async def display_text(
         self,
@@ -282,6 +298,9 @@ class XyaoLedPanel:
             # A static black frame first hides the previous screen scrolling out.
             cmds = protocol.mono_cmds([render.blank_grid()], (0, 0, 0), 1, dur=0x05) + cmds
         await self._execute(cmds, clear_first=clear)
+        self._set_preview(
+            await self._hass.async_add_executor_job(render.preview_png, grids[0], tuple(rgb))
+        )
 
     async def display_image(self, path: str, fit: str = "contain", clear: bool = True) -> None:
         gif, nframes = await self._hass.async_add_executor_job(render.make_gif, path, fit)
@@ -290,6 +309,9 @@ class XyaoLedPanel:
         except ValueError as err:
             raise HomeAssistantError(f"Image is too large for the panel: {err}") from err
         await self._execute(cmds, clear_first=clear)
+        self._set_preview(
+            await self._hass.async_add_executor_job(render.preview_png_from_gif, gif)
+        )
 
     async def display_pixel_art(
         self,
@@ -308,3 +330,6 @@ class XyaoLedPanel:
         grid = await self._hass.async_add_executor_job(_grid)
         cmds = protocol.mono_cmds([grid], rgb, 2, scroll=False)
         await self._execute(cmds, clear_first=clear)
+        self._set_preview(
+            await self._hass.async_add_executor_job(render.preview_png, grid, tuple(rgb))
+        )

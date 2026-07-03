@@ -22,6 +22,8 @@
       "init": {
         "description": "If your panel ignores commands (the bundled handshake is rejected), capture your own init frame from the official app and paste it here as hex. See PROTOCOL.md in the repository.",
         "data": {
+          "notify_color": "Default color (notifications & clock)",
+          "notify_speed": "Default speed (notifications & clock)",
           "init_hex": "Init frame (hex, optional)"
         }
       }
@@ -40,6 +42,16 @@
     "notify": {
       "panel": {
         "name": "Panel"
+      }
+    },
+    "switch": {
+      "clock": {
+        "name": "Clock"
+      }
+    },
+    "image": {
+      "preview": {
+        "name": "Preview"
       }
     }
   },
