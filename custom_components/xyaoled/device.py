@@ -10,7 +10,7 @@ from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from homeassistant.components import bluetooth
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
 from . import protocol, render
@@ -55,6 +55,7 @@ class XyaoLedPanel:
         self.width: int = protocol.W
         self.height: int = protocol.H
         self._listeners: list[Callable[[], None]] = []
+        self._last_available: bool | None = None
 
         # Set from device notifications so we can wait on them instead of sleeping.
         self._handshaked = asyncio.Event()
@@ -80,6 +81,14 @@ class XyaoLedPanel:
             return True
         return bluetooth.async_address_present(self._hass, self.address, connectable=True)
 
+    @callback
+    def check_available(self, *_args: object) -> None:
+        """Push availability changes to entities (wired to bluetooth callbacks)."""
+        avail = self.available
+        if avail != self._last_available:
+            self._last_available = avail
+            self._fire()
+
     def _on_notify(self, _char, data: bytearray) -> None:
         b = bytes(data)
         _LOGGER.debug("<- notify: %s", b.hex(" "))
@@ -101,9 +110,14 @@ class XyaoLedPanel:
         self._write_char = None
         self._hass.loop.call_soon_threadsafe(self._fire)
 
-    async def _connect(self) -> None:
+    async def _connect(self) -> tuple[BleakClient, object]:
+        """Return a connected (client, write_char) pair, connecting if needed.
+
+        Callers must use the returned pair rather than re-reading self._client:
+        the disconnected-callback may null the attributes at any moment.
+        """
         if self._client is not None and self._client.is_connected:
-            return
+            return self._client, self._write_char
         ble_device = bluetooth.async_ble_device_from_address(
             self._hass, self.address, connectable=True
         )
@@ -147,6 +161,7 @@ class XyaoLedPanel:
         self._client = client
         self._write_char = write_char
         self._fire()
+        return client, write_char
 
     def _schedule_disconnect(self) -> None:
         if self._disconnect_handle is not None:
@@ -171,13 +186,12 @@ class XyaoLedPanel:
         """Connect (incl. handshake) if needed, then write the command frames."""
         async with self._lock:
             try:
-                await self._connect()
+                client, write_char = await self._connect()
                 if cmds and self.brightness == 0:
                     _LOGGER.warning(
                         "Panel brightness is 0 - the content will be invisible. "
                         "Turn it up via the panel's light entity."
                     )
-                client, write_char = self._client, self._write_char
                 chunk = min(512, (getattr(client, "mtu_size", 515) or 515) - 3)
                 _LOGGER.debug(
                     "Sending %d frame(s), chunk size %d%s",
@@ -212,6 +226,11 @@ class XyaoLedPanel:
             except BleakError as err:
                 await self.disconnect()
                 raise HomeAssistantError(f"BLE communication with panel failed: {err}") from err
+            except Exception:
+                # The panel accepts only one central: never leave a connection
+                # dangling without an idle timeout, it would lock out the app.
+                await self.disconnect()
+                raise
             self._schedule_disconnect()
 
     # ----------------------------------------------------------------- operations
@@ -252,7 +271,13 @@ class XyaoLedPanel:
             return [render.render_centered(message, size, font)], False
 
         grids, scroll = await self._hass.async_add_executor_job(_render)
-        cmds = protocol.mono_cmds(grids, rgb, 2, dur=speed, scroll=scroll)
+        try:
+            cmds = protocol.mono_cmds(grids, rgb, 2, dur=speed, scroll=scroll)
+        except ValueError as err:
+            raise HomeAssistantError(
+                f"Message is too long for a single transfer ({err}). "
+                "Shorten the text or increase the font size."
+            ) from err
         if scroll and clear:
             # A static black frame first hides the previous screen scrolling out.
             cmds = protocol.mono_cmds([render.blank_grid()], (0, 0, 0), 1, dur=0x05) + cmds
@@ -260,7 +285,10 @@ class XyaoLedPanel:
 
     async def display_image(self, path: str, fit: str = "contain", clear: bool = True) -> None:
         gif, nframes = await self._hass.async_add_executor_job(render.make_gif, path, fit)
-        cmds = protocol.gif_cmds(gif, nframes, 2)
+        try:
+            cmds = protocol.gif_cmds(gif, nframes, 2)
+        except ValueError as err:
+            raise HomeAssistantError(f"Image is too large for the panel: {err}") from err
         await self._execute(cmds, clear_first=clear)
 
     async def display_pixel_art(

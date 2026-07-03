@@ -118,7 +118,8 @@ class XyaoLedLight(XyaoLedEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         if ATTR_BRIGHTNESS in kwargs:
-            await self._panel.set_brightness(round(kwargs[ATTR_BRIGHTNESS] * 100 / 255))
+            # never round HA's lowest step (1/255) down to panel level 0 = dark
+            await self._panel.set_brightness(max(1, round(kwargs[ATTR_BRIGHTNESS] * 100 / 255)))
         if not self._panel.power or ATTR_BRIGHTNESS not in kwargs:
             await self._panel.set_power(True)
 
