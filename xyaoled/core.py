@@ -79,11 +79,33 @@ async def resolve_address(address: str | None = None) -> str:
     )
 
 
+# Notification prefixes the device sends (see PROTOCOL.md).
+NOTIFY_HANDSHAKE = b"\x88\xff\x00\x05"   # status frame after a valid init
+NOTIFY_IMAGE_DONE = b"\x88\xff\x05\x01"  # image/animation transfer finished
+
+# Command type that carries image data and therefore triggers a completion notify.
+IMAGE_TYPE = 0x0207
+
+
+def _frame_type(cmd: bytes) -> int:
+    return int.from_bytes(cmd[8:10], "little") if len(cmd) >= 10 else -1
+
+
+async def _wait(event: asyncio.Event, timeout: float) -> None:
+    """Wait for an event, but never hang: fall back to the timeout."""
+    try:
+        await asyncio.wait_for(event.wait(), timeout)
+    except asyncio.TimeoutError:
+        pass
+
+
 async def send(cmds, clear_first=False, address=None, do_init=True, on_notify=None):
     """Connect, run the handshake, optionally clear, then write the given command frames.
 
     Large frames are split into <=512-byte ATT writes; the device reassembles them by
-    the length field in each frame's header.
+    the length field in each frame's header. Rather than sleeping a fixed time, we wait
+    for the device's own notifications (handshake status, image-complete) with a
+    generous timeout fallback so a quiet device never hangs the call.
     """
     addr = await resolve_address(address)
     async with BleakClient(addr, timeout=20.0) as c:
@@ -98,22 +120,43 @@ async def send(cmds, clear_first=False, address=None, do_init=True, on_notify=No
         if write_char is None:
             raise SystemExit("Control characteristic (ae01) not found on this device.")
 
-        if notify_char is not None:
-            await c.start_notify(notify_char, on_notify or (lambda *_: None))
+        handshaked = asyncio.Event()
+        image_done = asyncio.Event()
+
+        def _notify(char, data):
+            b = bytes(data)
+            if b.startswith(NOTIFY_HANDSHAKE):
+                handshaked.set()
+            elif b.startswith(NOTIFY_IMAGE_DONE):
+                image_done.set()
+            if on_notify:
+                on_notify(char, data)
+
+        have_notify = notify_char is not None
+        if have_notify:
+            await c.start_notify(notify_char, _notify)
             await asyncio.sleep(0.3)
 
         chunk = min(512, (getattr(c, "mtu_size", 515) or 515) - 3)
 
         if do_init:
             await c.write_gatt_char(write_char, get_init(), response=False)
-            await asyncio.sleep(1.0)
+            if have_notify:
+                await _wait(handshaked, 3.0)
+            else:
+                await asyncio.sleep(1.0)
         if clear_first:
             await c.write_gatt_char(write_char, clear_cmd(), response=False)
-            await asyncio.sleep(0.7)
+            await asyncio.sleep(0.5)  # clear sends no completion notify
 
+        expect_done = have_notify and any(_frame_type(cmd) == IMAGE_TYPE for cmd in cmds)
+        image_done.clear()
         for cmd in cmds:
             for i in range(0, len(cmd), chunk):
                 await c.write_gatt_char(write_char, cmd[i:i + chunk], response=False)
-                await asyncio.sleep(0.02)
-            await asyncio.sleep(0.35)
-        await asyncio.sleep(1.0)
+                await asyncio.sleep(0.02)  # pace writes so the BLE buffer keeps up
+            await asyncio.sleep(0.15)      # small gap between frames
+        if expect_done:
+            await _wait(image_done, 8.0)   # image transfer sends a completion notify
+        else:
+            await asyncio.sleep(0.3)       # power/brightness/clear settle

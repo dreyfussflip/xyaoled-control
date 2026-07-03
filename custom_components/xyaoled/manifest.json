@@ -12,8 +12,8 @@
   "dependencies": ["bluetooth_adapters"],
   "documentation": "https://github.com/samcgn/xyaoled-control",
   "integration_type": "device",
-  "iot_class": "local_polling",
+  "iot_class": "assumed_state",
   "issue_tracker": "https://github.com/samcgn/xyaoled-control/issues",
-  "requirements": ["Pillow>=10.0.0"],
+  "requirements": ["Pillow>=10.0.0", "bleak-retry-connector>=3.4.0"],
   "version": "1.0.0"
 }

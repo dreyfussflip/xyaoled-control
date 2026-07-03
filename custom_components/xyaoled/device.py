@@ -29,6 +29,14 @@ _LOGGER = logging.getLogger(__name__)
 IDLE_DISCONNECT = 30.0
 
 
+async def _wait(event: asyncio.Event, timeout: float) -> None:
+    """Wait for a device notification, but never hang: fall back to the timeout."""
+    try:
+        await asyncio.wait_for(event.wait(), timeout)
+    except asyncio.TimeoutError:
+        pass
+
+
 class XyaoLedPanel:
     """One 64x16 panel; serializes commands and manages the BLE session."""
 
@@ -47,6 +55,10 @@ class XyaoLedPanel:
         self.width: int = protocol.W
         self.height: int = protocol.H
         self._listeners: list[Callable[[], None]] = []
+
+        # Set from device notifications so we can wait on them instead of sleeping.
+        self._handshaked = asyncio.Event()
+        self._image_done = asyncio.Event()
 
     # ------------------------------------------------------------- state plumbing
 
@@ -69,14 +81,18 @@ class XyaoLedPanel:
         return bluetooth.async_address_present(self._hass, self.address, connectable=True)
 
     def _on_notify(self, _char, data: bytearray) -> None:
-        _LOGGER.debug("<- notify: %s", bytes(data).hex(" "))
-        status = protocol.parse_status(bytes(data))
+        b = bytes(data)
+        _LOGGER.debug("<- notify: %s", b.hex(" "))
+        status = protocol.parse_status(b)
         if status:
             _LOGGER.debug("<- status parsed: %s", status)
+            self._handshaked.set()
             self.power = status["power"]
             self.width = status["width"] or self.width
             self.height = status["height"] or self.height
             self._fire()
+        elif b.startswith(protocol.NOTIFY_IMAGE_DONE):
+            self._image_done.set()
 
     # ----------------------------------------------------------------- connection
 
@@ -124,8 +140,9 @@ class XyaoLedPanel:
         )
         # Handshake: without a valid init frame the device ignores all commands.
         _LOGGER.debug("-> init: %s", self._init_frame.hex(" "))
+        self._handshaked.clear()
         await client.write_gatt_char(write_char, self._init_frame, response=False)
-        await asyncio.sleep(1.0)
+        await _wait(self._handshaked, 3.0)
 
         self._client = client
         self._write_char = write_char
@@ -171,7 +188,12 @@ class XyaoLedPanel:
                     await client.write_gatt_char(
                         write_char, protocol.clear_cmd(), response=False
                     )
-                    await asyncio.sleep(0.7)
+                    await asyncio.sleep(0.5)  # clear sends no completion notify
+                expect_done = any(
+                    int.from_bytes(cmd[8:10], "little") == protocol.IMAGE_TYPE
+                    for cmd in cmds
+                )
+                self._image_done.clear()
                 for cmd in cmds:
                     _LOGGER.debug(
                         "-> frame type 0x%04x, %d bytes: %s%s",
@@ -182,8 +204,11 @@ class XyaoLedPanel:
                         await client.write_gatt_char(
                             write_char, cmd[i : i + chunk], response=False
                         )
-                        await asyncio.sleep(0.02)
-                    await asyncio.sleep(0.35)
+                        await asyncio.sleep(0.02)  # pace writes so the buffer keeps up
+                    await asyncio.sleep(0.15)       # small gap between frames
+                if expect_done:
+                    # image/animation transfer ends with a completion notify
+                    await _wait(self._image_done, 8.0)
             except BleakError as err:
                 await self.disconnect()
                 raise HomeAssistantError(f"BLE communication with panel failed: {err}") from err
