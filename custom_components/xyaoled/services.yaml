@@ -41,7 +41,6 @@ display_text:
       selector:
         text:
     clear:
-      required: true
       default: true
       selector:
         boolean:
@@ -65,7 +64,6 @@ display_image:
             - contain
             - stretch
     clear:
-      required: true
       default: true
       selector:
         boolean:
@@ -92,7 +90,6 @@ display_pixel_art:
           min: 0
           max: 255
     invert:
-      required: true
       default: false
       selector:
         boolean:
@@ -104,7 +101,6 @@ display_pixel_art:
             - contain
             - stretch
     clear:
-      required: true
       default: true
       selector:
         boolean:

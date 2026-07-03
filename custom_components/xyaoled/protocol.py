@@ -1,7 +1,9 @@
 """Pure frame builders for the XYAO-LED BLE wire protocol (no I/O).
 
-Vendored from the xyaoled library in this repository so the integration is
-self-contained. See PROTOCOL.md at the repository root for the full format.
+Vendored from the ``xyaoled`` library in this repository so the integration is
+self-contained (HACS installs only ``custom_components/``). KEEP THE FRAME LOGIC
+IN SYNC with ``xyaoled/core.py`` and ``xyaoled/gif.py``; ``tools/check_vendor_sync.py``
+verifies the two produce byte-identical frames. See PROTOCOL.md for the full format.
 """
 from __future__ import annotations
 
@@ -31,8 +33,16 @@ COLOR_CMD_PARAMS = bytes([0xFF, 0x00])
 # 11 fixed header bytes (after the 2-byte sub-length) for a static full-colour GIF.
 STATIC_HDR_TAIL = bytes([0x00, 0x02, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00])
 
-# Max GIF bytes carried in a single 0x0207 frame (frame len cap 10000 - 11 - 13).
+# The per-frame length field caps at 10000. Subtract the 11-byte frame wrapper and
+# the in-payload header (13 bytes for the first 0x0207 frame, 5 bytes for each 0x0209
+# continuation) to get the max GIF bytes carried per command.
 MAX_0207_GIF = 10000 - 11 - 13
+MAX_0209_GIF = 10000 - 11 - 5
+
+# Command type carrying image data (triggers a completion notify), and the device
+# notification prefix that marks an image/animation transfer as finished.
+IMAGE_TYPE = 0x0207
+NOTIFY_IMAGE_DONE = b"\x88\xff\x05\x01"
 
 
 def frame(type_le: int, seq: int, params: bytes) -> bytes:
@@ -89,19 +99,26 @@ def mono_cmds(grids: list[list[list[int]]], rgb: tuple[int, int, int], seq: int,
 
 
 def gif_cmds(gif: bytes, nframes: int, seq: int) -> list[bytes]:
-    """Static colour image (single 0x0207) or animation (always 0x0207 + 0x0209)."""
+    """Static colour image (single 0x0207) or animation (0x0207 + one/more 0x0209).
+
+    The device accumulates GIF bytes until it has the total announced in the 0x0207
+    sub-length, so large animations are chunked across as many 0x0209 continuation
+    frames as needed (each within the 10000-byte per-frame limit).
+    """
     color = frame(0x0204, seq, COLOR_CMD_PARAMS)
     if nframes <= 1:
         payload = len(gif).to_bytes(2, "little") + STATIC_HDR_TAIL + gif
         return [color, frame(0x0207, seq, payload)]
     # Animation: header byte 3 = 0x03, byte 11 = 0x03, frame count at byte 9.
-    # Bytes 5..8 are don't-care. Animations MUST be split into 0x0207 + 0x0209.
+    # Bytes 5..8 are don't-care. Animations MUST always have at least one 0x0209.
     hdr = bytes([0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, nframes & 0xFF, 0x00, 0x03, 0x00])
     split = MAX_0207_GIF if len(gif) > MAX_0207_GIF else max(1, len(gif) // 2)
-    p1, p2 = gif[:split], gif[split:]
-    pl207 = len(gif).to_bytes(2, "little") + hdr + p1
-    pl209 = len(p2).to_bytes(2, "little") + bytes([0x00, 0x02, 0x00]) + p2
-    return [color, frame(0x0207, seq, pl207), frame(0x0209, seq, pl209)]
+    cmds = [color, frame(0x0207, seq, len(gif).to_bytes(2, "little") + hdr + gif[:split])]
+    rest = gif[split:]
+    for i in range(0, len(rest), MAX_0209_GIF):
+        chunk = rest[i:i + MAX_0209_GIF]
+        cmds.append(frame(0x0209, seq, len(chunk).to_bytes(2, "little") + bytes([0x00, 0x02, 0x00]) + chunk))
+    return cmds
 
 
 def parse_status(data: bytes) -> dict | None:
