@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import math
 import os
+from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageSequence
 
@@ -27,6 +28,7 @@ FONT_PATHS = [
 ]
 
 
+@lru_cache(maxsize=16)
 def _load_font(size: int, font_path: str | None = None):
     for fp in ([font_path] if font_path else []) + FONT_PATHS:
         try:
@@ -222,12 +224,16 @@ def _fit(im: Image.Image, fit: str) -> Image.Image:
 def make_gif(path: str, fit: str = "contain") -> tuple[bytes, int]:
     """Re-encode any image / animated GIF as a 64x16 GIF89a the panel accepts."""
     src = Image.open(path)
-    frames = [_fit(f, fit) for f in ImageSequence.Iterator(src)]
-    durs = [f.info.get("duration", 100) for f in ImageSequence.Iterator(src)]
+    frames, durs = [], []
+    # One pass: _fit() forces the frame to load, and only a loaded frame has a
+    # reliable per-frame duration in info (WebP fills it in lazily on load).
+    for f in ImageSequence.Iterator(src):
+        frames.append(_fit(f, fit))
+        durs.append(int(f.info.get("duration") or 100))
     pal = [fr.convert("P", palette=Image.ADAPTIVE, colors=256) for fr in frames]
     buf = io.BytesIO()
     pal[0].save(buf, format="GIF", save_all=True, append_images=pal[1:],
-                duration=durs[:len(pal)] or 100, loop=0, version="GIF89a")
+                duration=durs, loop=0, version="GIF89a")
     data = bytearray(buf.getvalue())
     data[:6] = b"GIF89a"
     return bytes(data), len(pal)

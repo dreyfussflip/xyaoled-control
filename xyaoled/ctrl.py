@@ -30,8 +30,11 @@ def main(argv=None):
         cmds = [core.brightness_cmd(a.brightness)]
     else:
         cmds = [core.power_cmd(a.on)]
-    asyncio.run(core.send(cmds, address=a.address,
-                          on_notify=lambda _, d: print("notify:", bytes(d).hex(" "))))
+    try:
+        asyncio.run(core.send(cmds, address=a.address,
+                              on_notify=lambda _, d: print("notify:", bytes(d).hex(" "))))
+    except core.XyaoError as e:
+        raise SystemExit(f"Error: {e}")
 
 
 if __name__ == "__main__":

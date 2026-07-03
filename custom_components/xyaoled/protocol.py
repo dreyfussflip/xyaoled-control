@@ -39,10 +39,18 @@ STATIC_HDR_TAIL = bytes([0x00, 0x02, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0
 MAX_0207_GIF = 10000 - 11 - 13
 MAX_0209_GIF = 10000 - 11 - 5
 
+# The total GIF size is announced in a u16 sub-length, so one transfer can
+# never carry more than 65535 bytes of GIF data.
+MAX_GIF_BYTES = 0xFFFF
+
 # Command type carrying image data (triggers a completion notify), and the device
 # notification prefix that marks an image/animation transfer as finished.
 IMAGE_TYPE = 0x0207
 NOTIFY_IMAGE_DONE = b"\x88\xff\x05\x01"
+
+# A mono image is a single 0x0207 frame, so it must fit the 10000-byte cap:
+# 11-byte wrapper + 25-byte payload header + 128 bytes per bitmap frame.
+MAX_MONO_FRAMES = (10000 - 11 - 25) // 128  # 77
 
 
 def frame(type_le: int, seq: int, params: bytes) -> bytes:
@@ -85,6 +93,11 @@ def mono_cmds(grids: list[list[list[int]]], rgb: tuple[int, int, int], seq: int,
               dur: int = 0x3C, scroll: bool = False) -> list[bytes]:
     """1-bit image in a single colour. grids: list of 16x64 grids -> [colour, image]."""
     n = len(grids)
+    if not 1 <= n <= MAX_MONO_FRAMES:
+        raise ValueError(f"mono image supports 1..{MAX_MONO_FRAMES} frames, got {n}")
+    rgb = tuple(rgb)
+    if len(rgb) != 3 or not all(isinstance(v, int) and 0 <= v <= 255 for v in rgb):
+        raise ValueError(f"rgb must be three ints 0..255, got {rgb!r}")
     bitmap = b"".join(pack_bitmap(g) for g in grids)
     head = bytearray(PL_HEAD)
     head[9] = n
@@ -105,6 +118,11 @@ def gif_cmds(gif: bytes, nframes: int, seq: int) -> list[bytes]:
     sub-length, so large animations are chunked across as many 0x0209 continuation
     frames as needed (each within the 10000-byte per-frame limit).
     """
+    if len(gif) > MAX_GIF_BYTES:
+        raise ValueError(
+            f"GIF is {len(gif)} bytes; the protocol caps one transfer at {MAX_GIF_BYTES}. "
+            "Use fewer frames or a simpler image."
+        )
     color = frame(0x0204, seq, COLOR_CMD_PARAMS)
     if nframes <= 1:
         payload = len(gif).to_bytes(2, "little") + STATIC_HDR_TAIL + gif

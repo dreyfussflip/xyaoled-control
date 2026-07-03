@@ -4,6 +4,7 @@ The panel's text/bitmap format is 1 bit per pixel plus a single RGB colour.
 """
 import argparse
 import asyncio
+from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -17,6 +18,10 @@ PL_HEAD = bytes([0x8C, 0x00, 0x00, 0x02, 0x00, 0x02, 0x01, 0x00, 0x00, 0x01, 0x0
 PL_MID = bytes([0x00, 0x00, 0xFF, 0x00, 0x3C, 0x00])
 COLOR_CMD_PARAMS = bytes([0xFF, 0x00])
 
+# A mono image is a single 0x0207 frame, so it must fit the 10000-byte cap:
+# 11-byte wrapper + 25-byte payload header + 128 bytes per bitmap frame.
+MAX_MONO_FRAMES = (10000 - 11 - 25) // 128  # 77
+
 # Common monospace fonts to try (any TrueType works; falls back to PIL default).
 FONTS = [
     "/System/Library/Fonts/Monaco.ttf",
@@ -25,6 +30,7 @@ FONTS = [
 ]
 
 
+@lru_cache(maxsize=16)
 def _load_font(size, font_path):
     for fp in ([font_path] if font_path else []) + FONTS:
         try:
@@ -108,6 +114,11 @@ def pack_bitmap(grid):
 def build_mono(frames, rgb, seq, dur=0x3C, scroll=False):
     """frames: list of 16x64 grids. Returns [colour_cmd, image_cmd]."""
     n = len(frames)
+    if not 1 <= n <= MAX_MONO_FRAMES:
+        raise ValueError(f"mono image supports 1..{MAX_MONO_FRAMES} frames, got {n}")
+    rgb = tuple(rgb)
+    if len(rgb) != 3 or not all(isinstance(v, int) and 0 <= v <= 255 for v in rgb):
+        raise ValueError(f"rgb must be three ints 0..255, got {rgb!r}")
     bitmap = b"".join(pack_bitmap(g) for g in frames)
     head = bytearray(PL_HEAD)
     head[9] = n
@@ -129,7 +140,7 @@ def _ascii(grid):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Show text on a XYAO-LED 64x16 panel.")
     ap.add_argument("text", nargs="+")
-    ap.add_argument("--color", default="255,0,0", help="R,G,B")
+    ap.add_argument("--color", type=core.parse_color, default="255,0,0", help="R,G,B (0..255)")
     ap.add_argument("--size", type=int, default=14)
     ap.add_argument("--pages", action="store_true", help="split long text into pages")
     ap.add_argument("--scroll", action="store_true", help="hardware horizontal scroll")
@@ -141,7 +152,7 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     text = " ".join(a.text)
-    rgb = [int(x) for x in a.color.split(",")]
+    rgb = a.color
 
     if a.scroll:
         frames = render_strip(text, a.size, a.font)
@@ -156,7 +167,10 @@ def main(argv=None):
     for g in frames[:6]:
         _ascii(g)
         print()
-    cmds = build_mono(frames, rgb, 2, dur=dur, scroll=a.scroll)
+    try:
+        cmds = build_mono(frames, rgb, 2, dur=dur, scroll=a.scroll)
+    except ValueError as e:
+        ap.error(str(e))
 
     if a.scroll and not a.no_black_first:
         # static black first hides the previous screen scrolling out
@@ -166,8 +180,11 @@ def main(argv=None):
     if a.dry_run:
         print(f"{len(frames)} frame(s); image-cmd {len(cmds[-1])} bytes (not sent)")
         return
-    asyncio.run(core.send(cmds, clear_first=a.clear, address=a.address,
-                           on_notify=lambda _, d: print("notify:", bytes(d).hex(" "))))
+    try:
+        asyncio.run(core.send(cmds, clear_first=a.clear, address=a.address,
+                              on_notify=lambda _, d: print("notify:", bytes(d).hex(" "))))
+    except core.XyaoError as e:
+        raise SystemExit(f"Error: {e}")
 
 
 if __name__ == "__main__":

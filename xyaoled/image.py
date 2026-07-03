@@ -105,7 +105,7 @@ def from_image(path, threshold, invert, fit):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Single-colour pixel graphics on a XYAO-LED panel.")
     ap.add_argument("source", help="image path OR pattern: " + ", ".join(PATTERNS))
-    ap.add_argument("--color", default="255,0,0")
+    ap.add_argument("--color", type=core.parse_color, default="255,0,0", help="R,G,B (0..255)")
     ap.add_argument("--threshold", type=int, default=128)
     ap.add_argument("--invert", action="store_true")
     ap.add_argument("--fit", choices=["contain", "stretch"], default="contain")
@@ -113,15 +113,17 @@ def main(argv=None):
     ap.add_argument("--address", default=None)
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
-    rgb = [int(x) for x in a.color.split(",")]
     grid = PATTERNS[a.source]() if a.source in PATTERNS else from_image(a.source, a.threshold, a.invert, a.fit)
     for r in range(H):
         print("".join("#" if grid[r][c] else "." for c in range(W)))
-    cmds = build_mono([grid], rgb, 2, scroll=False)
+    cmds = build_mono([grid], a.color, 2, scroll=False)
     if a.dry_run:
         print("(not sent)")
         return
-    asyncio.run(core.send(cmds, clear_first=a.clear, address=a.address))
+    try:
+        asyncio.run(core.send(cmds, clear_first=a.clear, address=a.address))
+    except core.XyaoError as e:
+        raise SystemExit(f"Error: {e}")
 
 
 if __name__ == "__main__":

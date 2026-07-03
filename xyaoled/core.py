@@ -31,8 +31,23 @@ MAGIC = bytes.fromhex("99aa002eff88")
 DEFAULT_INIT_HEX = "99aa002eff881f00000001001a06030b1a2f030100a1a9df647ff700000000"
 
 
+class XyaoError(Exception):
+    """Device/transport error. The CLI mains map this to a clean exit message."""
+
+
 def get_init() -> bytes:
     return bytes.fromhex(os.environ.get("XYAO_INIT_HEX", DEFAULT_INIT_HEX))
+
+
+def parse_color(s: str) -> tuple[int, int, int]:
+    """Parse 'R,G,B' (0..255 each); raises ValueError for argparse to report."""
+    try:
+        rgb = tuple(int(p) for p in s.split(","))
+    except ValueError:
+        rgb = ()
+    if len(rgb) != 3 or not all(0 <= v <= 255 for v in rgb):
+        raise ValueError(f"expected R,G,B with values 0..255, got {s!r}")
+    return rgb
 
 
 def frame(type_le: int, seq: int, params: bytes) -> bytes:
@@ -73,7 +88,7 @@ async def resolve_address(address: str | None = None) -> str:
         if d.name and d.name.startswith(NAME_PREFIX):
             print(f"Found {d.name} @ {d.address}")
             return d.address
-    raise SystemExit(
+    raise XyaoError(
         f"No '{NAME_PREFIX}*' device found. Make sure it is on and not connected to "
         f"the phone app, or set XYAO_ADDRESS / pass --address."
     )
@@ -118,7 +133,7 @@ async def send(cmds, clear_first=False, address=None, do_init=True, on_notify=No
                     if ch.uuid.lower().startswith(NOTIFY_CHAR_PREFIX):
                         notify_char = ch
         if write_char is None:
-            raise SystemExit("Control characteristic (ae01) not found on this device.")
+            raise XyaoError("Control characteristic (ae01) not found on this device.")
 
         handshaked = asyncio.Event()
         image_done = asyncio.Event()

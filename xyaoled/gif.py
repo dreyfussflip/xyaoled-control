@@ -18,6 +18,10 @@ STATIC_HDR_TAIL = bytes([0x00, 0x02, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0
 MAX_0207_GIF = 10000 - 11 - 13
 MAX_0209_GIF = 10000 - 11 - 5
 
+# The total GIF size is announced in a u16 sub-length, so one transfer can
+# never carry more than 65535 bytes of GIF data.
+MAX_GIF_BYTES = 0xFFFF
+
 
 def _fit(im, fit):
     im = im.convert("RGB")
@@ -31,12 +35,16 @@ def _fit(im, fit):
 
 def make_gif(path, fit):
     src = Image.open(path)
-    frames = [_fit(f, fit) for f in ImageSequence.Iterator(src)]
-    durs = [f.info.get("duration", 100) for f in ImageSequence.Iterator(src)]
+    frames, durs = [], []
+    # One pass: _fit() forces the frame to load, and only a loaded frame has a
+    # reliable per-frame duration in info (WebP fills it in lazily on load).
+    for f in ImageSequence.Iterator(src):
+        frames.append(_fit(f, fit))
+        durs.append(int(f.info.get("duration") or 100))
     pal = [fr.convert("P", palette=Image.ADAPTIVE, colors=256) for fr in frames]
     buf = io.BytesIO()
     pal[0].save(buf, format="GIF", save_all=True, append_images=pal[1:],
-                duration=durs[:len(pal)] or 100, loop=0, version="GIF89a")
+                duration=durs, loop=0, version="GIF89a")
     data = bytearray(buf.getvalue())
     data[:6] = b"GIF89a"
     return bytes(data), len(pal)
@@ -49,6 +57,11 @@ def build_cmds(gif, nframes, seq):
     sub-length, so large animations are chunked across as many 0x0209 continuation
     frames as needed (each within the 10000-byte per-frame limit).
     """
+    if len(gif) > MAX_GIF_BYTES:
+        raise ValueError(
+            f"GIF is {len(gif)} bytes; the protocol caps one transfer at {MAX_GIF_BYTES}. "
+            "Use fewer frames or a simpler image."
+        )
     color = frame(0x0204, seq, bytes([0xFF, 0x00]))
     if nframes <= 1:
         payload = len(gif).to_bytes(2, "little") + STATIC_HDR_TAIL + gif
@@ -74,13 +87,19 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     gif, n = make_gif(a.image, a.fit)
-    cmds = build_cmds(gif, n, 2)
+    try:
+        cmds = build_cmds(gif, n, 2)
+    except ValueError as e:
+        ap.error(str(e))
     print(f"{n} frame(s), GIF {len(gif)} bytes, {len(cmds)} commands")
     if a.dry_run:
         print("(not sent)")
         return
-    asyncio.run(core.send(cmds, clear_first=a.clear, address=a.address,
-                          on_notify=lambda _, d: print("notify:", bytes(d).hex(" "))))
+    try:
+        asyncio.run(core.send(cmds, clear_first=a.clear, address=a.address,
+                              on_notify=lambda _, d: print("notify:", bytes(d).hex(" "))))
+    except core.XyaoError as e:
+        raise SystemExit(f"Error: {e}")
 
 
 if __name__ == "__main__":
