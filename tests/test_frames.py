@@ -114,6 +114,34 @@ def test_gif_rejects_oversized():
         gif.build_cmds(bytes(gif.MAX_GIF_BYTES + 1), 8, 2)
 
 
+# ------------------------------------------------------------- init-frame checks
+
+def test_validate_init_accepts_bundled_default():
+    core.validate_init(bytes.fromhex(core.DEFAULT_INIT_HEX))  # must not raise
+
+
+@pytest.mark.parametrize("bad,reason", [
+    (b"\x99\xaa", "at least 11"),
+    (bytes(31), "magic header"),
+    (bytes.fromhex(core.DEFAULT_INIT_HEX) + b"\x00", "does not match"),
+    (core.frame(0x0011, 1, b"\x01\x01\x01"), "command type"),
+])
+def test_validate_init_rejects_malformed(bad, reason):
+    with pytest.raises(ValueError, match=reason):
+        core.validate_init(bad)
+
+
+def test_get_init_rejects_bad_env(monkeypatch):
+    monkeypatch.setenv("XYAO_INIT_HEX", "keinhex")
+    with pytest.raises(core.XyaoError, match="Invalid XYAO_INIT_HEX"):
+        core.get_init()
+    monkeypatch.setenv("XYAO_INIT_HEX", bytes(31).hex())
+    with pytest.raises(core.XyaoError, match="magic header"):
+        core.get_init()
+    monkeypatch.delenv("XYAO_INIT_HEX")
+    assert core.get_init() == bytes.fromhex(core.DEFAULT_INIT_HEX)
+
+
 # ------------------------------------------------------------------ input parsing
 
 def test_parse_color_valid():

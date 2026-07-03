@@ -35,8 +35,31 @@ class XyaoError(Exception):
     """Device/transport error. The CLI mains map this to a clean exit message."""
 
 
+def validate_init(data: bytes) -> None:
+    """Structurally validate a captured init frame; raises ValueError.
+
+    A handshake frame is MAGIC + total_len(u16) + type 0x0000 + seq + token,
+    so we can catch copy-paste accidents before ever talking to the device.
+    """
+    if len(data) < 11:
+        raise ValueError(f"init frame is {len(data)} bytes, expected at least 11")
+    if not data.startswith(MAGIC):
+        raise ValueError(f"init frame must start with the magic header {MAGIC.hex()}")
+    total = int.from_bytes(data[6:8], "little")
+    if total != len(data):
+        raise ValueError(f"embedded length {total} does not match frame length {len(data)}")
+    if int.from_bytes(data[8:10], "little") != 0x0000:
+        raise ValueError("not a handshake frame (command type must be 0x0000)")
+
+
 def get_init() -> bytes:
-    return bytes.fromhex(os.environ.get("XYAO_INIT_HEX", DEFAULT_INIT_HEX))
+    hex_str = os.environ.get("XYAO_INIT_HEX", DEFAULT_INIT_HEX)
+    try:
+        data = bytes.fromhex(hex_str)
+        validate_init(data)
+    except ValueError as e:
+        raise XyaoError(f"Invalid XYAO_INIT_HEX: {e}") from e
+    return data
 
 
 def parse_color(s: str) -> tuple[int, int, int]:

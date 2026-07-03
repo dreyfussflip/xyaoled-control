@@ -27,7 +27,8 @@
       }
     },
     "error": {
-      "invalid_hex": "Not a valid hex string"
+      "invalid_hex": "Not a valid hex string",
+      "invalid_init": "Not a valid init frame (must start with 99aa002eff88, contain its own length, and be a type-0000 handshake)"
     }
   },
   "entity": {

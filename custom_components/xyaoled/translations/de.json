@@ -27,7 +27,8 @@
       }
     },
     "error": {
-      "invalid_hex": "Kein gültiger Hex-String"
+      "invalid_hex": "Kein gültiger Hex-String",
+      "invalid_init": "Kein gültiger Init-Frame (muss mit 99aa002eff88 beginnen, seine eigene Länge enthalten und ein Typ-0000-Handshake sein)"
     }
   },
   "entity": {

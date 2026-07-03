@@ -19,7 +19,7 @@ from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 
 from .const import CONF_INIT_HEX, DOMAIN
-from .protocol import NAME_PREFIX
+from .protocol import NAME_PREFIX, validate_init
 
 
 class XyaoLedConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -101,15 +101,23 @@ class XyaoLedOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            init_hex = user_input.get(CONF_INIT_HEX, "").strip().lower()
+            init_hex = user_input.get(CONF_INIT_HEX, "").strip().lower().replace(" ", "")
             if init_hex:
                 try:
-                    bytes.fromhex(init_hex)
+                    data = bytes.fromhex(init_hex)
                 except ValueError:
                     return self.async_show_form(
                         step_id="init",
                         data_schema=self._schema(init_hex),
                         errors={CONF_INIT_HEX: "invalid_hex"},
+                    )
+                try:
+                    validate_init(data)
+                except ValueError:
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=self._schema(init_hex),
+                        errors={CONF_INIT_HEX: "invalid_init"},
                     )
             return self.async_create_entry(data={CONF_INIT_HEX: init_hex})
 

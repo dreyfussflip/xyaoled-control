@@ -108,6 +108,18 @@ def build_checks() -> list[tuple[str, object, object]]:
          _err(gif.build_cmds, bytes(70000), 8, 2),
          _err(ven.gif_cmds, bytes(70000), 8, 2)),
     ]
+
+    # Init-frame validation must accept the bundled default and reject the
+    # same malformed inputs with the same messages.
+    default = bytes.fromhex(core.DEFAULT_INIT_HEX)
+    for name, bad in [
+        ("validate_init_default", default),
+        ("validate_init_short", default[:8]),
+        ("validate_init_bad_magic", b"\x00" * len(default)),
+        ("validate_init_bad_length", default + b"\x00"),
+        ("validate_init_bad_type", core.frame(0x0011, 1, b"\x01\x01\x01")),
+    ]:
+        checks.append((name, _err(core.validate_init, bad), _err(ven.validate_init, bad)))
     return checks
 
 
