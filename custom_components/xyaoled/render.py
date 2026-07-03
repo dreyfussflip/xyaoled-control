@@ -1,7 +1,8 @@
 """Pillow-based rendering for the 64x16 panel (text, mono art, full-colour GIFs).
 
 All functions here are synchronous and CPU-bound; call them via an executor.
-Vendored from the xyaoled library in this repository.
+Vendored from the ``xyaoled`` library (xyaoled/text.py, image.py, gif.py); keep the
+rendering logic in sync with those.
 """
 from __future__ import annotations
 
