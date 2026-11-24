@@ -19,6 +19,7 @@ namespace espbt = esphome::esp32_ble_tracker;
 class XyaoLED : public Component, public ble_client::BLEClientNode {
  public:
   void setup() override;
+  void on_shutdown() override;
   void loop() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::AFTER_BLUETOOTH; }

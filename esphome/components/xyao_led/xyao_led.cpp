@@ -35,6 +35,17 @@ void XyaoLED::setup() {
   }
 }
 
+// Planned restarts (OTA, reboot button): drop the BLE link cleanly. If the ESP32 just vanishes, the panel keeps
+// the dead connection and stops advertising, so nothing can reconnect until the panel is power-cycled.
+void XyaoLED::on_shutdown() {
+  if (this->node_state == espbt::ClientState::ESTABLISHED) {
+    ESP_LOGI(TAG, "disconnecting from the panel before restart");
+    esp_ble_gattc_close((esp_gatt_if_t) this->parent()->get_gattc_if(), this->parent()->get_conn_id());
+    esp_ble_gap_disconnect(this->parent()->get_remote_bda());
+    delay(300);
+  }
+}
+
 void XyaoLED::dump_config() {
   ESP_LOGCONFIG(TAG, "XYAO LED panel:");
   ESP_LOGCONFIG(TAG, "  Width: %d", this->width_);
