@@ -51,6 +51,7 @@ data:
 | `:battery: 71%` | Built-in icon, see list below |
 | `:warning: GO~:battery: 23%` | Pages (`~`): the panel alternates them itself (`speed` sets the page time) |
 | `:warning:[green]GO` | `[colour]` switches colour from that point on (`red`, `green`, `blue`, `yellow`, `white`, `cyan`, `magenta`, `orange` or `[#rrggbb]`) |
+| `High UV\|[red]{warning}` | Text inside `{ }` blinks at 2 Hz (GIF mode) |
 | `:battery_low!:23%` | `!` makes an icon blink at 2 Hz; the off phase uses the icon `<name>_off` if there is one (e.g. the battery's bottom bar blinks) |
 
 If a page is wider than the panel, it is re-rendered in `narrow`, then `tall`, then `slim`, then `small`, before it is

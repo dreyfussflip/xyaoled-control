@@ -309,7 +309,14 @@ static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt
                                     int phase, bool *animated, Rgb *colour, bool *has_colour) {
   std::vector<Col> out;
   bool after_icon = false;  // icons end with a blank column: skip the next glyph's leading blank one
+  bool blink_text = false;  // inside "{...}": text blinks (blank in odd phases)
   for (size_t p = 0; p < text.size(); p++) {
+    if (text[p] == '{' || text[p] == '}') {
+      blink_text = text[p] == '{';
+      if (blink_text)
+        *animated = true;
+      continue;
+    }
     size_t tag = parse_colour_tag(text, p, colour);
     if (tag) {
       *has_colour = true;
@@ -356,8 +363,9 @@ static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt
     int i = ch - 32;
     int k0 = (after_icon && ch != ' ' && fnt->widths[i] > 1 && fnt->columns[fnt->offsets[i]] == 0) ? 1 : 0;
     after_icon = false;
+    bool hide = blink_text && (phase % 2);
     for (int k = k0; k < fnt->widths[i]; k++)
-      out.push_back({(uint16_t) (fnt->columns[fnt->offsets[i] + k] << text_shift), *colour, *colour});
+      out.push_back({(uint16_t) (hide ? 0 : fnt->columns[fnt->offsets[i] + k] << text_shift), *colour, *colour});
   }
   return out;
 }
