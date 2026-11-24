@@ -4,6 +4,8 @@
 #include "esphome/core/hal.h"
 #include "xyao_font.h"
 #include <algorithm>
+#include <cstring>
+#include "esphome/core/helpers.h"
 
 namespace esphome {
 namespace xyao_led {
@@ -14,6 +16,24 @@ static const uint16_t CHAR_AE01 = 0xAE01;
 static const uint16_t CHAR_AE02 = 0xAE02;
 static const int PANEL_H = 16;
 static const int MAX_FRAMES = 77;  // one 0x0207 frame is capped at 10000 bytes
+
+void XyaoLED::setup() {
+  this->pref_ = global_preferences->make_preference<Saved>(fnv1_hash("xyao_led_last"));
+  Saved s{};
+  if (this->pref_.load(&s) && s.valid == 1) {
+    s.text[sizeof(s.text) - 1] = s.font[sizeof(s.font) - 1] = s.effect[sizeof(s.effect) - 1] = 0;
+    this->last_.valid = true;
+    this->last_.text = s.text;
+    this->last_.font = s.font;
+    this->last_.effect = s.effect;
+    this->last_.r = s.r;
+    this->last_.g = s.g;
+    this->last_.b = s.b;
+    this->last_.mode = s.mode;
+    this->last_.speed = s.speed;
+    ESP_LOGI(TAG, "restored last message '%s'", s.text);
+  }
+}
 
 void XyaoLED::dump_config() {
   ESP_LOGCONFIG(TAG, "XYAO LED panel:");
@@ -505,6 +525,19 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
   this->last_.b = b;
   this->last_.mode = mode;
   this->last_.speed = speed;
+  {
+    Saved s{};
+    strncpy(s.text, text.c_str(), sizeof(s.text) - 1);
+    strncpy(s.font, font.c_str(), sizeof(s.font) - 1);
+    strncpy(s.effect, effect.c_str(), sizeof(s.effect) - 1);
+    s.r = r;
+    s.g = g;
+    s.b = b;
+    s.valid = 1;
+    s.mode = mode;
+    s.speed = speed;
+    this->pref_.save(&s);
+  }
   const int W = this->width_;
   const Rgb base_colour{r, g, b};
   const XyaoFont *base = find_font(font.empty() ? this->default_font_ : font);

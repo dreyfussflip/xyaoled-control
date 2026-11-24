@@ -1,6 +1,7 @@
 #pragma once
 #ifdef USE_ESP32
 #include "esphome/core/component.h"
+#include "esphome/core/preferences.h"
 #include "esphome/components/ble_client/ble_client.h"
 #include <esp_gattc_api.h>
 #include <string>
@@ -17,6 +18,7 @@ namespace espbt = esphome::esp32_ble_tracker;
 // this component sends it automatically on every (re)connect.
 class XyaoLED : public Component, public ble_client::BLEClientNode {
  public:
+  void setup() override;
   void loop() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::AFTER_BLUETOOTH; }
@@ -72,6 +74,15 @@ class XyaoLED : public Component, public ble_client::BLEClientNode {
     int mode, speed;
   } last_;
   bool resend_pending_{false};
+  // the last message is also kept in flash, so it comes back after the ESP32 itself restarts
+  struct Saved {
+    char text[201];
+    char font[12];
+    char effect[8];
+    uint8_t r, g, b, valid;
+    int16_t mode, speed;
+  };
+  ESPPreferenceObject pref_;
 };
 
 }  // namespace xyao_led
