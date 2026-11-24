@@ -508,7 +508,7 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
       std::vector<Col> best = pg.on;
       const XyaoFont *best_fnt = base;
       const char *best_used = used;
-      for (const char *alt : {"narrow", "tall", "small"}) {
+      for (const char *alt : {"narrow", "tall", "slim", "small"}) {
         const char *u2 = used;
         bool bl = false, co = false;
         auto p2 = render_page(part, find_font(alt), base_colour, &u2, 0, &bl, &co);

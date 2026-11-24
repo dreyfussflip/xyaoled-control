@@ -19,7 +19,7 @@ library) but has not been tested on hardware with this component yet.
 |---|---|
 | `text.<name>_message` | Type a message — short text is centred, longer text scrolls |
 | `select.<name>_colour` | Colour used by the message box |
-| `select.<name>_font` | `mono`, `sans`, `bold`, `italic`, `narrow`, `large`, `tall`, `small` |
+| `select.<name>_font` | `mono`, `sans`, `bold`, `italic`, `narrow`, `large`, `tall`, `slim`, `small` |
 | `select.<name>_effect` | `none` or `flash` (flash works for text that fits without scrolling) |
 | `number.<name>_brightness` | 0–100 |
 | `switch.<name>_power` | Panel on/off, state read back from the panel |
@@ -53,7 +53,7 @@ data:
 | `:warning:[green]GO` | `[colour]` switches colour from that point on (`red`, `green`, `blue`, `yellow`, `white`, `cyan`, `magenta`, `orange` or `[#rrggbb]`) |
 | `:battery_low!:23%` | `!` makes an icon blink at 2 Hz; the off phase uses the icon `<name>_off` if there is one (e.g. the battery's bottom bar blinks) |
 
-If a page is wider than the panel, it is re-rendered in `narrow`, then `tall`, then `small`, before it is
+If a page is wider than the panel, it is re-rendered in `narrow`, then `tall`, then `slim`, then `small`, before it is
 clipped (single pages scroll instead, unless they fit in a narrower font). `mode: 2` forces
 scrolling in the chosen font.
 
@@ -101,10 +101,11 @@ write, then sends the init handshake. If your panel never reports a status in th
   descriptive `name`.
 - **Playlist.** Each image is appended to the panel's looping playlist, so `display_text`
   always clears first.
-- **Fonts.** `xyao_font.h` holds eight bitmap fonts generated from the DejaVu family by
+- **Fonts.** `xyao_font.h` holds nine bitmap fonts generated from the DejaVu family by
   [`esphome/tools/gen_font.py`](../esphome/tools/gen_font.py): `mono`, `sans` (proportional, fits
   more), `bold`, `italic`, `narrow`, `tall` (narrow letters with hand-drawn 13-row digits from
-  `esphome/tools/tall_digits.txt`, good for numbers next to an icon), `large` (16 px, ~2 characters on a 32-wide panel) and `small` (8 rows, used for
+  `esphome/tools/tall_digits.txt`, good for numbers next to an icon), `slim` (DejaVu Sans Condensed
+  15 px squeezed to 70 % width: tall letters at ~5 px wide, for words next to an icon), `large` (16 px, ~2 characters on a 32-wide panel) and `small` (8 rows, used for
   two-line messages, ~6 characters per line on a 32-wide panel).
   ASCII 32–126; other characters render as `?`. Set the default with `font:` on `xyao_led`.
 - **Flash.** `effect: flash` sends a two-frame animation (text, blank) that the panel loops

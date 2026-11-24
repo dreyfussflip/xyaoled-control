@@ -27,6 +27,8 @@ FONTS = [
     ("large", "DejaVuSans-Bold.ttf", 16, 15),
     # "tall": narrow letters with hand-drawn 13-row digits (tall_digits.txt) for numbers beside icons
     ("tall", "DejaVuSansCondensed.ttf", 12, 12),
+    # "slim": the 8-row small font stretched vertically to ~14 rows (plus the tall digits): narrow but tall
+    ("slim", "DejaVuSansCondensed.ttf", 15, 13),
     # 8-row font for two-line messages: glyphs use rows 0..7 (shifted down 8 for line 2)
     ("small", "DejaVuSansMono.ttf", 8, 6),
 ]
@@ -61,6 +63,34 @@ def render(path, size, baseline):
             cc.pop()
         if code == 32:
             cc = [0] * max(3, adv // 2)
+        widths.append(len(cc))
+        cols.append(cc)
+    return widths, cols
+
+
+def render_squeezed(path, size, baseline, squeeze):
+    """Render each glyph at `size`, then squeeze it horizontally (box filter + threshold)."""
+    f = ImageFont.truetype(path, size)
+    asc, _ = f.getmetrics()
+    widths, cols = [], []
+    for code in range(32, 127):
+        ch = chr(code)
+        adv = max(2, int(round(f.getlength(ch))))
+        img = Image.new("L", (adv, H), 0)
+        d = ImageDraw.Draw(img)
+        d.fontmode = "1"
+        d.text((0, baseline - asc), ch, fill=255, font=f)
+        nw = max(2, int(round(adv * squeeze)))
+        img = img.resize((nw, H), Image.BOX).point(lambda v: 255 if v >= 110 else 0)
+        cc = []
+        for x in range(nw):
+            v = 0
+            for y in range(H):
+                if img.getpixel((x, y)):
+                    v |= 1 << y
+            cc.append(v)
+        if code == 32:
+            cc = [0] * 3
         widths.append(len(cc))
         cols.append(cc)
     return widths, cols
@@ -155,7 +185,9 @@ def main():
     table = []
     for name, fname, size, base in FONTS:
         widths, cols = render(find(fname, a.fonts_dir), size, base)
-        if name == "tall":
+        if name == "slim":
+            widths, cols = render_squeezed(find(fname, a.fonts_dir), size, base, 0.7)
+        if name in ("tall", "slim"):
             for ch, gcols in parse_glyphs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tall_digits.txt"), top=1):
                 widths[ord(ch) - 32] = len(gcols)
                 cols[ord(ch) - 32] = gcols
