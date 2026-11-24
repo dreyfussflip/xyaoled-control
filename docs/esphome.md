@@ -68,7 +68,7 @@ Animated icons (colour, play in GIF mode): `rain` (cloud + falling drops), `uv` 
 falling from a shower head), `santa` (winks), `candle` (flickering flame), `sleigh` (reindeer and
 sleigh riding across the whole panel, 15 frames), `fireworks` (rocket, burst, sparkles), `water`
 (a bottle filling up), `bulb` (flickers and switches off), `night` (moon with twinkling stars),
-`lollipop` (spinning swirl), `wind` (gusting lines). An icon is animated
+`lollipop` (spinning swirl), `wind` (gusting lines), `cold` (thermometer dropping). An icon is animated
 when `icons.txt` has numbered frames `name_1`, `name_2`, … instead of `name`; a colour pair after
 the name (e.g. `rain_1 white blue`) fixes the icon's top/bottom-half colours.
 
