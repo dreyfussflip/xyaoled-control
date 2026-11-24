@@ -211,9 +211,27 @@ static const XyaoFont *find_font(const std::string &name) {
   return &XYAO_FONTS[0];
 }
 
-static std::vector<uint16_t> render_line(const std::string &text, const XyaoFont *fnt) {
+// Renders one line of text; ":name:" inserts a built-in icon (see esphome/tools/icons.txt).
+static std::vector<uint16_t> render_line(const std::string &text, const XyaoFont *fnt, bool allow_icons) {
   std::vector<uint16_t> out;
-  for (unsigned char ch : text) {
+  for (size_t p = 0; p < text.size(); p++) {
+    if (allow_icons && text[p] == ':') {
+      size_t q = text.find(':', p + 1);
+      if (q != std::string::npos && q - p > 1 && q - p <= 12) {
+        std::string name = text.substr(p + 1, q - p - 1);
+        const XyaoIcon *icon = nullptr;
+        for (int i = 0; i < XYAO_ICON_COUNT; i++)
+          if (name == XYAO_ICONS[i].name)
+            icon = &XYAO_ICONS[i];
+        if (icon != nullptr) {
+          for (int k = 0; k < icon->width; k++)
+            out.push_back(XYAO_ICON_COLS[icon->offset + k]);
+          p = q;
+          continue;
+        }
+      }
+    }
+    unsigned char ch = text[p];
     if (ch < 32 || ch > 126)
       ch = '?';
     int i = ch - 32;
@@ -223,14 +241,8 @@ static std::vector<uint16_t> render_line(const std::string &text, const XyaoFont
   return out;
 }
 
-void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_t b, int mode, int speed,
-                           const std::string &font, const std::string &effect) {
-  if (!this->is_ready()) {
-    ESP_LOGW(TAG, "display_text: panel not connected");
-    return;
-  }
-  const int W = this->width_;
-  // '|' or a newline starts a second line; two-line messages always use the 8-row "small" font
+// Renders one page: one line, or two lines ('|' / newline) in the 8-row "small" font.
+static std::vector<uint16_t> render_page(const std::string &text, const XyaoFont *base, const char **used) {
   std::vector<std::string> lines(1);
   for (char ch : text) {
     if ((ch == '|' || ch == '\n') && lines.size() < 2)
@@ -239,46 +251,78 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
       lines.back() += ch;
   }
   bool two = lines.size() == 2;
-  const XyaoFont *fnt = find_font(two ? std::string("small") : (font.empty() ? this->default_font_ : font));
+  const XyaoFont *fnt = two ? find_font("small") : base;
   bool small = std::string(fnt->name) == "small";
+  *used = fnt->name;
   std::vector<std::vector<uint16_t>> rendered;
   size_t w = 0;
   for (size_t li = 0; li < lines.size(); li++) {
-    auto cols = render_line(lines[li], fnt);
-    int shift = two ? (li == 0 ? 0 : 8) : (small ? 4 : 0);  // small single line is centred vertically
+    auto cols = render_line(lines[li], fnt, !small);  // icons are 16 rows: single-line pages only
+    int shift = two ? (li == 0 ? 0 : 8) : (small ? 4 : 0);
     for (auto &v : cols)
       v = (uint16_t) (v << shift);
     w = std::max(w, cols.size());
     rendered.push_back(cols);
   }
+  // overlay the lines, each centred within the widest one
+  std::vector<uint16_t> page(w, 0);
+  for (auto &line : rendered) {
+    size_t pad = (w - line.size()) / 2;
+    for (size_t k = 0; k < line.size(); k++)
+      page[pad + k] |= line[k];
+  }
+  return page;
+}
+
+void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_t b, int mode, int speed,
+                           const std::string &font, const std::string &effect) {
+  if (!this->is_ready()) {
+    ESP_LOGW(TAG, "display_text: panel not connected");
+    return;
+  }
+  const int W = this->width_;
+  const XyaoFont *base = find_font(font.empty() ? this->default_font_ : font);
+  // '~' splits the message into pages the panel shows in turn
+  std::vector<std::string> parts(1);
+  for (char ch : text) {
+    if (ch == '~')
+      parts.emplace_back();
+    else
+      parts.back() += ch;
+  }
+  const char *used = base->name;
+  std::vector<std::vector<uint16_t>> pages;
+  for (auto &part : parts)
+    pages.push_back(render_page(part, base, &used));
   bool flash = effect == "flash";
-  bool scroll = mode == 2 || (mode == 0 && (int) w > W);
-  int dur = speed > 0 ? std::min(speed, 255) : (flash && !scroll ? 0x14 : 0x3C);
+  bool multi = pages.size() > 1;
+  bool scroll = !multi && (mode == 2 || (mode == 0 && (int) pages[0].size() > W));
+  int dur = speed > 0 ? std::min(speed, 255) : (multi ? 0x3C : (flash && !scroll ? 0x14 : 0x3C));
   this->clear();  // otherwise each image is appended to the panel's looping playlist
   if (!scroll) {
-    std::vector<uint16_t> cols(W, 0);
-    for (auto &line : rendered) {  // centre each line on its own
-      int pad = (int) line.size() < W ? (W - (int) line.size()) / 2 : 0;
-      for (size_t k = 0; k < line.size() && pad + (int) k < W; k++)
-        cols[pad + k] |= line[k];
+    // one frame per page (+ a blank frame after each when flashing); each page centred, clipped to W
+    int per = flash ? 2 : 1;
+    int n = std::min(MAX_FRAMES, (int) pages.size() * per);
+    std::vector<uint16_t> cols((size_t) n * W, 0);
+    for (size_t pi = 0; pi < pages.size() && (int) (pi * per) < n; pi++) {
+      auto &pg = pages[pi];
+      int pad = (int) pg.size() < W ? (W - (int) pg.size()) / 2 : 0;
+      for (size_t k = 0; k < pg.size() && pad + (int) k < W; k++)
+        cols[pi * per * W + pad + k] = pg[k];
     }
-    if (flash)
-      cols.resize((size_t) W * 2, 0);  // frame 2 is blank: the panel alternates text / blank
-    this->send_mono_(cols, flash ? 2 : 1, r, g, b, false, dur);
+    this->send_mono_(cols, n, r, g, b, false, dur);
   } else {
     // a wide strip the panel scrolls itself: 2px lead + text + one screen of blank trail
-    std::vector<uint16_t> cols(2 + w, 0);
-    for (auto &line : rendered)
-      for (size_t k = 0; k < line.size(); k++)
-        cols[2 + k] |= line[k];
+    std::vector<uint16_t> cols(2, 0);
+    cols.insert(cols.end(), pages[0].begin(), pages[0].end());
     int n = std::min(MAX_FRAMES, ((int) cols.size() + W + W - 1) / W);
     cols.resize((size_t) n * W, 0);
     std::vector<uint16_t> black(W, 0);
     this->send_mono_(black, 1, 0, 0, 0, false, 0x05);  // hides the previous screen scrolling out
     this->send_mono_(cols, n, r, g, b, true, dur);
   }
-  ESP_LOGI(TAG, "text '%s' (%s, %d line%s, %d px, %s%s)", text.c_str(), fnt->name, (int) lines.size(),
-           two ? "s" : "", (int) w, scroll ? "scroll" : "static", flash && !scroll ? ", flash" : "");
+  ESP_LOGI(TAG, "text '%s' (%s, %d page%s, %s%s)", text.c_str(), used, (int) pages.size(), multi ? "s" : "",
+           scroll ? "scroll" : "static", flash && !scroll ? ", flash" : "");
 }
 
 }  // namespace xyao_led

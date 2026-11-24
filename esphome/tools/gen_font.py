@@ -64,6 +64,39 @@ def render(path, size, baseline):
     return widths, cols
 
 
+def parse_icons(path):
+    """icons.txt: a name line, then rows of '.'/'#' (<=16), blank line between icons.
+    Returns [(name, columns)], each icon vertically centred in 16 rows, 1 blank column after."""
+    icons, name, rows = [], None, []
+
+    def flush():
+        if name and rows:
+            w = max(len(r) for r in rows)
+            top = (H - len(rows)) // 2
+            cols = []
+            for x in range(w):
+                v = 0
+                for y, r in enumerate(rows):
+                    if x < len(r) and r[x] == "#":
+                        v |= 1 << (top + y)
+                cols.append(v)
+            icons.append((name, cols + [0]))
+
+    for line in open(path):
+        line = line.rstrip("\n")
+        if line.startswith("#") and not set(line) <= set("#."):
+            continue
+        if not line.strip():
+            flush()
+            name, rows = None, []
+        elif name is None:
+            name = line.strip()
+        else:
+            rows.append(line.strip())
+    flush()
+    return icons
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fonts-dir", default="")
@@ -102,6 +135,22 @@ def main():
                 rows[y] += " "
         print(f"--- {name} ({fname} {size}px, {o} columns)")
         print("\n".join(rows))
+    # icons
+    icons = parse_icons(os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons.txt"))
+    ioff, o2, allcols, names = [], 0, [], []
+    for name, cols in icons:
+        names.append(name)
+        ioff.append(o2)
+        allcols += cols
+        o2 += len(cols)
+    out.append("struct XyaoIcon {\n  const char *name;\n  uint16_t offset;\n  uint8_t width;\n};")
+    out.append(f"static const uint16_t XYAO_ICON_COLS[{max(1, o2)}] = {{" + ",".join("0x%04X" % v for v in allcols) + "};")
+    out.append(f"static const int XYAO_ICON_COUNT = {len(icons)};")
+    out.append("static const XyaoIcon XYAO_ICONS[] = {")
+    for (name, cols), off in zip(icons, ioff):
+        out.append(f'  {{"{name}", {off}, {len(cols)}}},')
+    out.append("};")
+    print("icons:", ", ".join(names))
     out.append(f"static const int XYAO_FONT_COUNT = {len(FONTS)};")
     out.append("static const XyaoFont XYAO_FONTS[] = {")
     out += table
