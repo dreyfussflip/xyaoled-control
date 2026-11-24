@@ -191,6 +191,18 @@ def main():
             for ch, gcols in parse_glyphs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "small_fixes.txt"), top=0):
                 widths[ord(ch) - 32] = len(gcols) + 1
                 cols[ord(ch) - 32] = [0] + gcols  # keep the font's leading-gap style
+            # proportional: trim each glyph to its ink, then one blank column in front (space stays 3 wide)
+            for i in range(95):
+                c = cols[i]
+                if i == 0:
+                    cols[i] = [0, 0, 0]
+                else:
+                    while c and c[0] == 0:
+                        c = c[1:]
+                    while c and c[-1] == 0:
+                        c = c[:-1]
+                    cols[i] = [0] + (c or [0])
+                widths[i] = len(cols[i])
         if name in ("tall", "slim"):
             for ch, gcols in parse_glyphs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tall_digits.txt"), top=1):
                 widths[ord(ch) - 32] = len(gcols)
