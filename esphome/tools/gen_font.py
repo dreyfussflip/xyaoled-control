@@ -187,6 +187,10 @@ def main():
         widths, cols = render(find(fname, a.fonts_dir), size, base)
         if name == "slim":
             widths, cols = render_squeezed(find(fname, a.fonts_dir), size, base, 0.7)
+        if name == "small":
+            for ch, gcols in parse_glyphs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "small_fixes.txt"), top=0):
+                widths[ord(ch) - 32] = len(gcols) + 1
+                cols[ord(ch) - 32] = [0] + gcols  # keep the font's leading-gap style
         if name in ("tall", "slim"):
             for ch, gcols in parse_glyphs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tall_digits.txt"), top=1):
                 widths[ord(ch) - 32] = len(gcols)

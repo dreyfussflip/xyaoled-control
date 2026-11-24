@@ -1,0 +1,16 @@
+# Hand-drawn replacements for glyphs of the 8-row "small" font (rows 0..7) that render badly.
+V
+#...#
+#...#
+#...#
+.#.#.
+.#.#.
+..#..
+
+v
+.....
+.....
+#...#
+#...#
+.#.#.
+..#..
