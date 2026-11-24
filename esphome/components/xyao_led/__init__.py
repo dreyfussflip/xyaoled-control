@@ -8,6 +8,8 @@ DEPENDENCIES = ["ble_client"]
 CODEOWNERS = ["@dreyfussflip"]
 
 CONF_INIT_FRAME = "init_frame"
+CONF_FONT = "font"
+FONTS = ["mono", "sans", "bold", "italic", "narrow", "large"]
 # Same sample handshake as xyaoled/core.py (DEFAULT_INIT_HEX). Capture your own if the panel ignores it.
 DEFAULT_INIT = "99aa002eff881f00000001001a06030b1a2f030100a1a9df647ff700000000"
 
@@ -30,6 +32,7 @@ CONFIG_SCHEMA = cv.ensure_list(
             cv.GenerateID(): cv.declare_id(XyaoLED),
             cv.Optional(CONF_WIDTH, default=32): cv.one_of(32, 64, int=True),
             cv.Optional(CONF_INIT_FRAME, default=DEFAULT_INIT): _hex,
+            cv.Optional(CONF_FONT, default="mono"): cv.one_of(*FONTS, lower=True),
         }
     )
     .extend(ble_client.BLE_CLIENT_SCHEMA)
@@ -44,3 +47,4 @@ async def to_code(config):
         await ble_client.register_ble_node(var, conf)
         cg.add(var.set_width(conf[CONF_WIDTH]))
         cg.add(var.set_init_hex(conf[CONF_INIT_FRAME]))
+        cg.add(var.set_default_font(conf[CONF_FONT]))

@@ -30,8 +30,11 @@ class XyaoLED : public Component, public ble_client::BLEClientNode {
   void set_power(bool on);
   void set_brightness(int level);  // 0..100
   void clear();                    // clears screen and the on-device playlist
-  // mode: 0 = auto (scroll if wider than the panel), 1 = static, 2 = scroll. speed: 0 = default
-  void display_text(const std::string &text, uint8_t r, uint8_t g, uint8_t b, int mode = 0, int speed = 0);
+  // mode: 0 = auto (scroll if wider than the panel), 1 = static, 2 = scroll. speed: 0 = default.
+  // font: mono, sans, bold, italic, narrow, large ("" = default). effect: "none" or "flash" (static text).
+  void display_text(const std::string &text, uint8_t r, uint8_t g, uint8_t b, int mode = 0, int speed = 0,
+                    const std::string &font = "", const std::string &effect = "");
+  void set_default_font(const std::string &font) { this->default_font_ = font; }
   void send_frames_hex(const std::string &hex);  // raw command frames, '|' separated
 
   bool is_ready() const { return this->ae01_handle_ != 0 && this->init_done_; }
@@ -59,6 +62,7 @@ class XyaoLED : public Component, public ble_client::BLEClientNode {
   bool init_done_{false};
   uint32_t init_at_{0};
   std::string init_hex_;
+  std::string default_font_{"mono"};
 };
 
 }  // namespace xyao_led

@@ -204,29 +204,38 @@ void XyaoLED::send_mono_(const std::vector<uint16_t> &cols, int n, uint8_t r, ui
   this->seq_++;
 }
 
-void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_t b, int mode, int speed) {
+void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_t b, int mode, int speed,
+                           const std::string &font, const std::string &effect) {
   if (!this->is_ready()) {
     ESP_LOGW(TAG, "display_text: panel not connected");
     return;
   }
   const int W = this->width_;
+  const std::string &fname = font.empty() ? this->default_font_ : font;
+  const XyaoFont *fnt = &XYAO_FONTS[0];
+  for (int i = 0; i < XYAO_FONT_COUNT; i++)
+    if (fname == XYAO_FONTS[i].name)
+      fnt = &XYAO_FONTS[i];
   std::vector<uint16_t> txt;
   for (unsigned char ch : text) {
     if (ch < 32 || ch > 126)
       ch = '?';
     int i = ch - 32;
-    for (int k = 0; k < XYAO_FONT_W[i]; k++)
-      txt.push_back(XYAO_FONT_COLS[XYAO_FONT_OFF[i] + k]);
+    for (int k = 0; k < fnt->widths[i]; k++)
+      txt.push_back(fnt->columns[fnt->offsets[i] + k]);
   }
+  bool flash = effect == "flash";
   bool scroll = mode == 2 || (mode == 0 && (int) txt.size() > W);
-  int dur = speed > 0 ? std::min(speed, 255) : 0x3C;
+  int dur = speed > 0 ? std::min(speed, 255) : (flash && !scroll ? 0x14 : 0x3C);
   this->clear();  // otherwise each image is appended to the panel's looping playlist
   if (!scroll) {
     std::vector<uint16_t> cols(W, 0);
     int pad = (int) txt.size() < W ? (W - (int) txt.size()) / 2 : 0;
     for (size_t k = 0; k < txt.size() && pad + (int) k < W; k++)
       cols[pad + k] = txt[k];
-    this->send_mono_(cols, 1, r, g, b, false, dur);
+    if (flash)
+      cols.resize((size_t) W * 2, 0);  // frame 2 is blank: the panel alternates text / blank
+    this->send_mono_(cols, flash ? 2 : 1, r, g, b, false, dur);
   } else {
     // a wide strip the panel scrolls itself: 2px lead + text + one screen of blank trail
     std::vector<uint16_t> cols(2, 0);
@@ -237,7 +246,8 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     this->send_mono_(black, 1, 0, 0, 0, false, 0x05);  // hides the previous screen scrolling out
     this->send_mono_(cols, n, r, g, b, true, dur);
   }
-  ESP_LOGI(TAG, "text '%s' (%d px, %s)", text.c_str(), (int) txt.size(), scroll ? "scroll" : "static");
+  ESP_LOGI(TAG, "text '%s' (%s, %d px, %s%s)", text.c_str(), fnt->name, (int) txt.size(), scroll ? "scroll" : "static",
+           flash && !scroll ? ", flash" : "");
 }
 
 }  // namespace xyao_led

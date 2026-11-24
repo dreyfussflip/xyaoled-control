@@ -32,8 +32,10 @@ api:
         blue: int
         mode: int    # 0 auto (scroll when wider than the panel), 1 static, 2 scroll
         speed: int   # 0 = default; higher = slower
+        font: string    # mono, sans, bold, italic, narrow, large ("" = default)
+        effect: string  # none, flash (flash applies to text that fits without scrolling)
       then:
-        - lambda: 'id(panel).display_text(message, red, green, blue, mode, speed);'
+        - lambda: 'id(panel).display_text(message, red, green, blue, mode, speed, font, effect);'
     # esphome.<name>_send_raw: raw command frames in hex, '|' separated (see PROTOCOL.md)
     - action: send_raw
       variables:
@@ -75,6 +77,22 @@ select:
     options: [Red, Green, Blue, Yellow, White, Cyan, Magenta, Orange]
     initial_option: Red
 
+  - platform: template
+    name: "Font"
+    id: panel_font
+    optimistic: true
+    restore_value: true
+    options: [mono, sans, bold, italic, narrow, large]
+    initial_option: mono
+
+  - platform: template
+    name: "Effect"
+    id: panel_effect
+    optimistic: true
+    restore_value: true
+    options: [none, flash]
+    initial_option: none
+
 text:
   - platform: template
     name: "Message"
@@ -92,7 +110,7 @@ text:
           else if (c == "Cyan") { r = 0; g = 255; b = 255; }
           else if (c == "Magenta") { r = 255; g = 0; b = 255; }
           else if (c == "Orange") { r = 255; g = 100; b = 0; }
-          id(panel).display_text(x, r, g, b, 0, 0);
+          id(panel).display_text(x, r, g, b, 0, 0, id(panel_font).current_option(), id(panel_effect).current_option());
 
 number:
   - platform: template
