@@ -106,6 +106,15 @@ void XyaoLED::loop() {
     this->send_frames_hex(this->init_hex_);
     this->init_done_ = true;
     this->seq_ = 2;
+    this->resend_pending_ = this->last_.valid;
+    this->init_at_ = millis() + 1500;
+    return;
+  }
+  if (this->resend_pending_ && this->is_ready() && (int32_t) (millis() - this->init_at_) >= 0) {
+    this->resend_pending_ = false;
+    ESP_LOGI(TAG, "reconnected: re-sending the last message");
+    auto l = this->last_;
+    this->display_text(l.text, l.r, l.g, l.b, l.mode, l.speed, l.font, l.effect);
   }
 }
 
@@ -487,6 +496,15 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     ESP_LOGW(TAG, "display_text: panel not connected");
     return;
   }
+  this->last_.valid = true;
+  this->last_.text = text;
+  this->last_.font = font;
+  this->last_.effect = effect;
+  this->last_.r = r;
+  this->last_.g = g;
+  this->last_.b = b;
+  this->last_.mode = mode;
+  this->last_.speed = speed;
   const int W = this->width_;
   const Rgb base_colour{r, g, b};
   const XyaoFont *base = find_font(font.empty() ? this->default_font_ : font);

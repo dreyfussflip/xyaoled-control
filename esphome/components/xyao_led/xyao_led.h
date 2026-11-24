@@ -64,6 +64,14 @@ class XyaoLED : public Component, public ble_client::BLEClientNode {
   uint32_t init_at_{0};
   std::string init_hex_;
   std::string default_font_{"mono"};
+  // last display_text call, re-sent after a reconnect (the panel shows its own default screen after a reset)
+  struct {
+    bool valid{false};
+    std::string text, font, effect;
+    uint8_t r, g, b;
+    int mode, speed;
+  } last_;
+  bool resend_pending_{false};
 };
 
 }  // namespace xyao_led

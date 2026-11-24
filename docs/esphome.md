@@ -100,6 +100,8 @@ write, then sends the init handshake. If your panel never reports a status in th
   but with Wi-Fi active 3–4 is a realistic maximum, and BLE range (≈10–30 m indoors) usually
   decides it. For panels spread over a site, use one ESP32 per location and give each a
   descriptive `name`.
+- **Reconnects.** The panel forgets its content when it loses power; the ESP32 re-sends the last
+  message automatically after it reconnects.
 - **Playlist.** Each image is appended to the panel's looping playlist, so `display_text`
   always clears first.
 - **Fonts.** `xyao_font.h` holds nine bitmap fonts generated from the DejaVu family by
