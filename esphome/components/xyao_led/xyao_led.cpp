@@ -268,6 +268,7 @@ static Rgb rgb_of(uint32_t v) { return {(uint8_t) (v >> 16), (uint8_t) ((v >> 8)
 static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt, bool allow_icons, int text_shift,
                                     int phase, bool *animated, Rgb *colour, bool *has_colour) {
   std::vector<Col> out;
+  bool after_icon = false;  // icons end with a blank column: skip the next glyph's leading blank one
   for (size_t p = 0; p < text.size(); p++) {
     size_t tag = parse_colour_tag(text, p, colour);
     if (tag) {
@@ -303,6 +304,7 @@ static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt
           for (int k = 0; k < icon->width; k++)
             out.push_back({(uint16_t) (draw != nullptr && k < draw->width ? XYAO_ICON_COLS[draw->offset + k] : 0), top,
                            bot});
+          after_icon = true;
           p = q;
           continue;
         }
@@ -312,7 +314,9 @@ static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt
     if (ch < 32 || ch > 126)
       ch = '?';
     int i = ch - 32;
-    for (int k = 0; k < fnt->widths[i]; k++)
+    int k0 = (after_icon && ch != ' ' && fnt->widths[i] > 1 && fnt->columns[fnt->offsets[i]] == 0) ? 1 : 0;
+    after_icon = false;
+    for (int k = k0; k < fnt->widths[i]; k++)
       out.push_back({(uint16_t) (fnt->columns[fnt->offsets[i] + k] << text_shift), *colour, *colour});
   }
   return out;
