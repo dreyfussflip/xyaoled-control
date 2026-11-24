@@ -358,6 +358,13 @@ static std::vector<Col> render_page(const std::string &text, const XyaoFont *bas
         d.bot = line[k].bot;
     }
   }
+  // trim blank columns at the edges (glyph spacing) so fit checks and centring use the visible width
+  while (!page.empty() && page.back().bits == 0)
+    page.pop_back();
+  size_t lead = 0;
+  while (lead < page.size() && page[lead].bits == 0)
+    lead++;
+  page.erase(page.begin(), page.begin() + lead);
   return page;
 }
 
