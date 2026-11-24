@@ -1,4 +1,5 @@
 #include "xyao_led.h"
+#include "esp_heap_caps.h"
 #ifdef USE_ESP32
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
@@ -516,27 +517,41 @@ class GifWriter {
   int w_, h_;
 };
 
+void XyaoLED::send_part_(uint16_t type, const std::vector<uint8_t> &hdr, const uint8_t *data, size_t n) {
+  // one allocation per frame: 11-byte frame header + params header + a slice of the payload
+  std::vector<uint8_t> f;
+  f.reserve(11 + hdr.size() + n);
+  f.insert(f.end(), {0x99, 0xAA, 0x00, 0x2E, 0xFF, 0x88, 0, 0, (uint8_t) (type & 0xFF), (uint8_t) (type >> 8), this->seq_});
+  f.insert(f.end(), hdr.begin(), hdr.end());
+  f.insert(f.end(), data, data + n);
+  f[6] = f.size() & 0xFF;
+  f[7] = (f.size() >> 8) & 0xFF;
+  this->write_raw_(f);
+}
+
 void XyaoLED::send_gif_(const std::vector<uint8_t> &gif, int frames) {
-  const size_t MAX_0207 = 10000 - 11 - 13, MAX_0209 = 10000 - 11 - 5;
+  // small parts keep the peak heap use low (BLE + Wi-Fi leave little contiguous RAM)
+  const size_t PART = 4000;
+  ESP_LOGD(TAG, "send gif %u bytes, free heap %u, largest block %u", (unsigned) gif.size(),
+           (unsigned) heap_caps_get_free_size(MALLOC_CAP_8BIT), (unsigned) heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   this->write_raw_(this->make_frame_(0x0204, {0xFF, 0x00}));
   delay(150);
-  std::vector<uint8_t> p = {(uint8_t) (gif.size() & 0xFF), (uint8_t) (gif.size() >> 8)};
-  if (frames <= 1) {
-    p.insert(p.end(), {0x00, 0x02, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00});
-    p.insert(p.end(), gif.begin(), gif.end());
-    this->write_raw_(this->make_frame_(0x0207, p));
+  std::vector<uint8_t> hdr = {(uint8_t) (gif.size() & 0xFF), (uint8_t) (gif.size() >> 8)};
+  if (frames <= 1 && gif.size() <= PART) {
+    hdr.insert(hdr.end(), {0x00, 0x02, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00});
+    this->send_part_(0x0207, hdr, gif.data(), gif.size());
   } else {
     // animations are always split across 0x0207 + at least one 0x0209
-    size_t split = gif.size() > MAX_0207 ? MAX_0207 : std::max<size_t>(1, gif.size() / 2);
-    p.insert(p.end(), {0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, (uint8_t) frames, 0x00, 0x03, 0x00});
-    p.insert(p.end(), gif.begin(), gif.begin() + split);
-    this->write_raw_(this->make_frame_(0x0207, p));
-    for (size_t i = split; i < gif.size(); i += MAX_0209) {
-      size_t n = std::min(MAX_0209, gif.size() - i);
+    size_t split = std::min(PART, std::max<size_t>(1, gif.size() / 2));
+    if (frames <= 1)
+      hdr.insert(hdr.end(), {0x00, 0x02, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00});
+    else
+      hdr.insert(hdr.end(), {0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, (uint8_t) frames, 0x00, 0x03, 0x00});
+    this->send_part_(0x0207, hdr, gif.data(), split);
+    for (size_t i = split; i < gif.size(); i += PART) {
+      size_t n = std::min(PART, gif.size() - i);
       delay(150);
-      std::vector<uint8_t> q = {(uint8_t) (n & 0xFF), (uint8_t) (n >> 8), 0x00, 0x02, 0x00};
-      q.insert(q.end(), gif.begin() + i, gif.begin() + i + n);
-      this->write_raw_(this->make_frame_(0x0209, q));
+      this->send_part_(0x0209, {(uint8_t) (n & 0xFF), (uint8_t) (n >> 8), 0x00, 0x02, 0x00}, gif.data() + i, n);
     }
   }
   delay(150);

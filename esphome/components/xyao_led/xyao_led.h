@@ -51,6 +51,7 @@ class XyaoLED : public Component, public ble_client::BLEClientNode {
   void send_mono_(const std::vector<uint16_t> &cols, int frames, uint8_t r, uint8_t g, uint8_t b, bool scroll,
                   int dur);
   void enable_notify_(esp_gatt_if_t gattc_if);
+  void send_part_(uint16_t type, const std::vector<uint8_t> &hdr, const uint8_t *data, size_t n);
   void send_gif_(const std::vector<uint8_t> &gif, int frames);
 
   uint16_t ae01_handle_{0};
