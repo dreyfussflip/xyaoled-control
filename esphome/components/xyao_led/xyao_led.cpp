@@ -500,16 +500,27 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     pg.on = render_page(part, base, base_colour, &used, 0, &pg.blink, &any_colour);
     // auto-fit: if a page is wider than the panel, try narrower fonts before clipping / scrolling
     if ((int) pg.on.size() > W && mode != 2) {
+      // take the first narrower font that fits; if none does, the narrowest result (least clipping)
+      std::vector<Col> best = pg.on;
+      const XyaoFont *best_fnt = base;
+      const char *best_used = used;
       for (const char *alt : {"narrow", "tall", "small"}) {
         const char *u2 = used;
         bool bl = false, co = false;
         auto p2 = render_page(part, find_font(alt), base_colour, &u2, 0, &bl, &co);
-        if ((int) p2.size() <= W) {
-          pg.on = p2;
-          used = u2;
-          pg.fnt = find_font(alt);
-          break;
+        if (p2.size() < best.size()) {
+          best = p2;
+          best_fnt = find_font(alt);
+          best_used = u2;
         }
+        if ((int) p2.size() <= W)
+          break;
+      }
+      // a single animated page can't scroll, and pages never scroll: use the narrowest rendering
+      if ((int) best.size() <= W || pg.blink || parts.size() > 1) {
+        pg.on = best;
+        pg.fnt = best_fnt;
+        used = best_used;
       }
     }
     if (pg.blink)
