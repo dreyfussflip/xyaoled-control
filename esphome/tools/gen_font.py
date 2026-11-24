@@ -25,6 +25,8 @@ FONTS = [
     ("italic", "DejaVuSans-Oblique.ttf", 12, 12),
     ("narrow", "DejaVuSansCondensed.ttf", 12, 12),
     ("large", "DejaVuSans-Bold.ttf", 16, 15),
+    # "tall": narrow letters with hand-drawn 13-row digits (tall_digits.txt) for numbers beside icons
+    ("tall", "DejaVuSansCondensed.ttf", 12, 12),
     # 8-row font for two-line messages: glyphs use rows 0..7 (shifted down 8 for line 2)
     ("small", "DejaVuSansMono.ttf", 8, 6),
 ]
@@ -62,6 +64,37 @@ def render(path, size, baseline):
         widths.append(len(cc))
         cols.append(cc)
     return widths, cols
+
+
+def parse_glyphs(path, top):
+    """Hand-drawn glyphs: a one-character name line, then rows of '.'/'#'. Adds 1 blank column."""
+    out, name, rows = [], None, []
+
+    def flush():
+        if name is not None and rows:
+            w = max(len(r) for r in rows)
+            cols = []
+            for x in range(w):
+                v = 0
+                for y, r in enumerate(rows):
+                    if x < len(r) and r[x] == "#":
+                        v |= 1 << (top + y)
+                cols.append(v)
+            out.append((name, cols + [0]))
+
+    for line in open(path):
+        line = line.rstrip("\n")
+        if line.startswith("# "):
+            continue
+        if not line.strip():
+            flush()
+            name, rows = None, []
+        elif name is None:
+            name = line.strip()
+        else:
+            rows.append(line.strip())
+    flush()
+    return out
 
 
 def parse_icons(path):
@@ -117,6 +150,10 @@ def main():
     table = []
     for name, fname, size, base in FONTS:
         widths, cols = render(find(fname, a.fonts_dir), size, base)
+        if name == "tall":
+            for ch, gcols in parse_glyphs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "tall_digits.txt"), top=1):
+                widths[ord(ch) - 32] = len(gcols)
+                cols[ord(ch) - 32] = gcols
         offs, o = [], 0
         for c in cols:
             offs.append(o)

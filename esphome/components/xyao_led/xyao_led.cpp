@@ -296,7 +296,7 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     // auto-fit: if a page is wider than the panel, try narrower fonts before clipping / scrolling
     auto pg = render_page(part, base, &used);
     if ((int) pg.size() > W && mode != 2) {
-      for (const char *alt : {"narrow", "small"}) {
+      for (const char *alt : {"narrow", "tall", "small"}) {
         const char *u2 = used;
         auto p2 = render_page(part, find_font(alt), &u2);
         if ((int) p2.size() <= W) {

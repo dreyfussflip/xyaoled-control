@@ -19,7 +19,7 @@ library) but has not been tested on hardware with this component yet.
 |---|---|
 | `text.<name>_message` | Type a message — short text is centred, longer text scrolls |
 | `select.<name>_colour` | Colour used by the message box |
-| `select.<name>_font` | `mono`, `sans`, `bold`, `italic`, `narrow`, `large`, `small` |
+| `select.<name>_font` | `mono`, `sans`, `bold`, `italic`, `narrow`, `large`, `tall`, `small` |
 | `select.<name>_effect` | `none` or `flash` (flash works for text that fits without scrolling) |
 | `number.<name>_brightness` | 0–100 |
 | `switch.<name>_power` | Panel on/off, state read back from the panel |
@@ -51,7 +51,7 @@ data:
 | `:battery: 71%` | Built-in icon, see list below |
 | `:warning: GO~:battery: 23%` | Pages (`~`): the panel alternates them itself (`speed` sets the page time) |
 
-If a page is wider than the panel, it is re-rendered in `narrow`, then `small`, before it is
+If a page is wider than the panel, it is re-rendered in `narrow`, then `tall`, then `small`, before it is
 clipped (single pages scroll instead, unless they fit in a narrower font). `mode: 2` forces
 scrolling in the chosen font.
 
@@ -82,9 +82,10 @@ write, then sends the init handshake. If your panel never reports a status in th
   descriptive `name`.
 - **Playlist.** Each image is appended to the panel's looping playlist, so `display_text`
   always clears first.
-- **Fonts.** `xyao_font.h` holds seven bitmap fonts generated from the DejaVu family by
+- **Fonts.** `xyao_font.h` holds eight bitmap fonts generated from the DejaVu family by
   [`esphome/tools/gen_font.py`](../esphome/tools/gen_font.py): `mono`, `sans` (proportional, fits
-  more), `bold`, `italic`, `narrow`, `large` (16 px, ~2 characters on a 32-wide panel) and `small` (8 rows, used for
+  more), `bold`, `italic`, `narrow`, `tall` (narrow letters with hand-drawn 13-row digits from
+  `esphome/tools/tall_digits.txt`, good for numbers next to an icon), `large` (16 px, ~2 characters on a 32-wide panel) and `small` (8 rows, used for
   two-line messages, ~6 characters per line on a 32-wide panel).
   ASCII 32–126; other characters render as `?`. Set the default with `font:` on `xyao_led`.
 - **Flash.** `effect: flash` sends a two-frame animation (text, blank) that the panel loops
