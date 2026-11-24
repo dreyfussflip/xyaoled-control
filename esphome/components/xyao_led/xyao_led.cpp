@@ -306,7 +306,7 @@ static Rgb rgb_of(uint32_t v) { return {(uint8_t) (v >> 16), (uint8_t) ((v >> 8)
 // that icon exists, otherwise blank); if only "<name>_1", "<name>_2", ... exist the icon is animated (frame =
 // phase). "[colour]" changes the colour from there on. Icons with fixed colours keep them.
 static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt, bool allow_icons, int text_shift,
-                                    int phase, bool *animated, Rgb *colour, bool *has_colour) {
+                                    int phase, int *anim_len, Rgb *colour, bool *has_colour) {
   std::vector<Col> out;
   bool after_icon = false;  // icons end with a blank column: skip the next glyph's leading blank one
   bool blink_text = false;  // inside "{...}": text blinks (blank in odd phases)
@@ -314,7 +314,7 @@ static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt
     if (text[p] == '{' || text[p] == '}') {
       blink_text = text[p] == '{';
       if (blink_text)
-        *animated = true;
+        *anim_len = std::max(*anim_len, 2);
       continue;
     }
     size_t tag = parse_colour_tag(text, p, colour);
@@ -336,12 +336,12 @@ static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt
           int n = 1;
           while (n < 16 && find_icon(name + "_" + std::to_string(n + 1)) != nullptr)
             n++;
-          *animated = true;
+          *anim_len = std::max(*anim_len, n);
           draw = find_icon(name + "_" + std::to_string(phase % n + 1));
         }
         if (icon != nullptr) {
           if (blink) {
-            *animated = true;
+            *anim_len = std::max(*anim_len, 2);
             if (phase % 2)
               draw = find_icon(name + "_off");
           }
@@ -372,7 +372,7 @@ static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt
 
 // Renders one page: one line, or two lines ('|' / newline) in the 8-row "small" font.
 static std::vector<Col> render_page(const std::string &text, const XyaoFont *base, Rgb colour, const char **used,
-                                    int phase, bool *animated, bool *has_colour) {
+                                    int phase, int *anim_len, bool *has_colour, bool trim = true) {
   std::vector<std::string> lines(1);
   for (char ch : text) {
     if ((ch == '|' || ch == '\n') && lines.size() < 2)
@@ -390,7 +390,7 @@ static std::vector<Col> render_page(const std::string &text, const XyaoFont *bas
     // icons are 16 rows tall, so they only appear on single-line pages; small text is centred vertically
     // small glyphs use rows 0-6 (1-row descenders), so line 1 = rows 0-6, row 7 blank, line 2 = rows 8-14
     int shift = two ? (li == 0 ? 0 : 8) : (small ? 4 : 0);
-    auto cols = render_line(lines[li], fnt, !two, shift, phase, animated, &colour, has_colour);
+    auto cols = render_line(lines[li], fnt, !two, shift, phase, anim_len, &colour, has_colour);
     w = std::max(w, cols.size());
     rendered.push_back(cols);
   }
@@ -408,6 +408,8 @@ static std::vector<Col> render_page(const std::string &text, const XyaoFont *bas
     }
   }
   // trim blank columns at the edges (glyph spacing) so fit checks and centring use the visible width
+  if (!trim)
+    return page;
   while (!page.empty() && page.back().bits == 0)
     page.pop_back();
   size_t lead = 0;
@@ -564,7 +566,7 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     std::string text;
     const XyaoFont *fnt;
     std::vector<Col> on;
-    bool blink;  // animated: blinking or multi-frame icons
+    int anim;  // animation length in steps: 0 = static, 2 = blinking, n = n-frame icon
   };
   // '~' splits the message into pages the panel shows in turn
   std::vector<std::string> parts(1);
@@ -578,8 +580,8 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
   std::vector<Page> pages;
   bool any_blink = false, any_colour = false;
   for (auto &part : parts) {
-    Page pg{part, base, {}, false};
-    pg.on = render_page(part, base, base_colour, &used, 0, &pg.blink, &any_colour);
+    Page pg{part, base, {}, 0};
+    pg.on = render_page(part, base, base_colour, &used, 0, &pg.anim, &any_colour);
     // auto-fit: if a page is wider than the panel, try narrower fonts before clipping / scrolling
     if ((int) pg.on.size() > W && mode != 2) {
       // take the first narrower font that fits; if none does, the narrowest result (least clipping)
@@ -588,7 +590,8 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
       const char *best_used = used;
       for (const char *alt : {"narrow", "tall", "slim", "small"}) {
         const char *u2 = used;
-        bool bl = false, co = false;
+        int bl = 0;
+        bool co = false;
         auto p2 = render_page(part, find_font(alt), base_colour, &u2, 0, &bl, &co);
         if (p2.size() < best.size()) {
           best = p2;
@@ -599,13 +602,13 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
           break;
       }
       // a single animated page can't scroll, and pages never scroll: use the narrowest rendering
-      if ((int) best.size() <= W || pg.blink || parts.size() > 1) {
+      if ((int) best.size() <= W || pg.anim || parts.size() > 1) {
         pg.on = best;
         pg.fnt = best_fnt;
         used = best_used;
       }
     }
-    if (pg.blink)
+    if (pg.anim)
       any_blink = true;
     pages.push_back(pg);
   }
@@ -652,14 +655,36 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     std::vector<std::pair<std::vector<uint8_t>, int>> frames;
     std::vector<uint8_t> blank((size_t) W * PANEL_H, 0);
     for (auto &pg : pages) {
-      if (pg.blink) {
-        // re-render the page for each time step; icons pick their blink phase / animation frame
-        int steps = std::max(2, page_cs / blink_cs);
-        steps += steps % 2;
+      if (pg.anim) {
+        // re-render the page for each time step (icons pick their blink phase / animation frame); all steps are
+        // trimmed by the same amount so moving icons (e.g. the sleigh) keep their position on the panel
+        int steps = std::max(pg.anim, page_cs / blink_cs);
+        steps = ((steps + pg.anim - 1) / pg.anim) * pg.anim;
+        if (steps > 120)
+          steps = 120;
+        std::vector<std::vector<Col>> raw;
+        size_t len = 0;
         for (int k = 0; k < steps; k++) {
-          bool d1 = false, d2 = false;
+          int d1 = 0;
+          bool d2 = false;
           const char *u3 = used;
-          frames.push_back({raster(render_page(pg.text, pg.fnt, base_colour, &u3, k, &d1, &d2)), blink_cs});
+          raw.push_back(render_page(pg.text, pg.fnt, base_colour, &u3, k, &d1, &d2, false));
+          len = std::max(len, raw.back().size());
+        }
+        size_t lead = len, trail = len;
+        for (auto &fr : raw) {
+          fr.resize(len, Col{0, {0, 0, 0}, {0, 0, 0}});
+          size_t a = 0, b = 0;
+          while (a < len && fr[a].bits == 0)
+            a++;
+          while (b < len && fr[len - 1 - b].bits == 0)
+            b++;
+          lead = std::min(lead, a);
+          trail = std::min(trail, b);
+        }
+        for (auto &fr : raw) {
+          std::vector<Col> cut(fr.begin() + std::min(lead, len), fr.end() - std::min(trail, len - std::min(lead, len)));
+          frames.push_back({raster(cut), blink_cs});
         }
       } else if (flash) {
         frames.push_back({raster(pg.on), 50});
@@ -668,8 +693,11 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
         frames.push_back({raster(pg.on), page_cs});
       }
     }
-    if (frames.size() > 255)
-      frames.resize(255);
+    if (frames.size() > 254)
+      frames.resize(254);
+    // the panel does not show the final frame of an animation: append a 10 ms copy of it as a sacrificial frame
+    if (frames.size() > 1)
+      frames.push_back({frames.back().first, 1});
     GifWriter gw(W, PANEL_H, palette);
     for (auto &f : frames)
       gw.frame(f.first, f.second);

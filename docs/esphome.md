@@ -51,6 +51,7 @@ data:
 | `:battery: 71%` | Built-in icon, see list below |
 | `:warning: GO~:battery: 23%` | Pages (`~`): the panel alternates them itself (`speed` sets the page time) |
 | `:warning:[green]GO` | `[colour]` switches colour from that point on (`red`, `green`, `blue`, `yellow`, `white`, `cyan`, `magenta`, `orange` or `[#rrggbb]`) |
+| `:santa:~[red]Merry\|[green]Xmas!~:sleigh:` | Animations play all their frames, even past the page time |
 | `High UV\|[red]{warning}` | Text inside `{ }` blinks at 2 Hz (GIF mode) |
 | `:battery_low!:23%` | `!` makes an icon blink at 2 Hz; the off phase uses the icon `<name>_off` if there is one (e.g. the battery's bottom bar blinks) |
 
@@ -64,7 +65,8 @@ Icons (`esphome/tools/icons.txt`, edit and re-run `gen_font.py` to add your own)
 
 Animated icons (colour, play in GIF mode): `rain` (cloud + falling drops), `uv` (blazing sun),
 `dinnerbell` (swinging bell), `coffee` (steaming cup), `pot` (steaming pot), `shower` (water
-falling from a shower head). An icon is animated
+falling from a shower head), `santa` (winks), `candle` (flickering flame), `sleigh` (reindeer and
+sleigh riding across the whole panel, 15 frames). An icon is animated
 when `icons.txt` has numbered frames `name_1`, `name_2`, … instead of `name`; a colour pair after
 the name (e.g. `rain_1 white blue`) fixes the icon's top/bottom-half colours.
 
