@@ -212,7 +212,8 @@ static const XyaoFont *find_font(const std::string &name) {
 }
 
 // Renders one line of text; ":name:" inserts a built-in icon (see esphome/tools/icons.txt).
-static std::vector<uint16_t> render_line(const std::string &text, const XyaoFont *fnt, bool allow_icons) {
+static std::vector<uint16_t> render_line(const std::string &text, const XyaoFont *fnt, bool allow_icons,
+                                         int text_shift) {
   std::vector<uint16_t> out;
   for (size_t p = 0; p < text.size(); p++) {
     if (allow_icons && text[p] == ':') {
@@ -236,7 +237,7 @@ static std::vector<uint16_t> render_line(const std::string &text, const XyaoFont
       ch = '?';
     int i = ch - 32;
     for (int k = 0; k < fnt->widths[i]; k++)
-      out.push_back(fnt->columns[fnt->offsets[i] + k]);
+      out.push_back((uint16_t) (fnt->columns[fnt->offsets[i] + k] << text_shift));
   }
   return out;
 }
@@ -257,10 +258,9 @@ static std::vector<uint16_t> render_page(const std::string &text, const XyaoFont
   std::vector<std::vector<uint16_t>> rendered;
   size_t w = 0;
   for (size_t li = 0; li < lines.size(); li++) {
-    auto cols = render_line(lines[li], fnt, !small);  // icons are 16 rows: single-line pages only
+    // icons are 16 rows tall, so they only appear on single-line pages; small text is centred vertically
     int shift = two ? (li == 0 ? 0 : 8) : (small ? 4 : 0);
-    for (auto &v : cols)
-      v = (uint16_t) (v << shift);
+    auto cols = render_line(lines[li], fnt, !two, shift);
     w = std::max(w, cols.size());
     rendered.push_back(cols);
   }
@@ -292,8 +292,22 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
   }
   const char *used = base->name;
   std::vector<std::vector<uint16_t>> pages;
-  for (auto &part : parts)
-    pages.push_back(render_page(part, base, &used));
+  for (auto &part : parts) {
+    // auto-fit: if a page is wider than the panel, try narrower fonts before clipping / scrolling
+    auto pg = render_page(part, base, &used);
+    if ((int) pg.size() > W && mode != 2) {
+      for (const char *alt : {"narrow", "small"}) {
+        const char *u2 = used;
+        auto p2 = render_page(part, find_font(alt), &u2);
+        if ((int) p2.size() <= W) {
+          pg = p2;
+          used = u2;
+          break;
+        }
+      }
+    }
+    pages.push_back(pg);
+  }
   bool flash = effect == "flash";
   bool multi = pages.size() > 1;
   bool scroll = !multi && (mode == 2 || (mode == 0 && (int) pages[0].size() > W));
