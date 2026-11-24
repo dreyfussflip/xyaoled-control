@@ -61,6 +61,11 @@ Icons (`esphome/tools/icons.txt`, edit and re-run `gen_font.py` to add your own)
 `battery`, `bolt`, `drop`, `food`, `shower`, `sun`, `moon`, `bell`, `warning`, `check`,
 `cross`, `heart`, `clock`, `wifi`, `temp`, `home`, `gate`, `battery_empty`, `battery_low`.
 
+Animated icons (colour, play in GIF mode): `rain` (cloud + falling drops), `uv` (blazing sun),
+`dinnerbell` (swinging bell), `coffee` (steaming cup), `pot` (steaming pot). An icon is animated
+when `icons.txt` has numbered frames `name_1`, `name_2`, … instead of `name`; a colour pair after
+the name (e.g. `rain_1 white blue`) fixes the icon's top/bottom-half colours.
+
 Plain messages are sent as a 1-bit image (one colour). Messages that use `[colour]` tags or
 blinking icons are rendered on the ESP32 as a full-colour **GIF animation** (per-pixel colour,
 exact frame timing; up to 7 colours per message). Example, as used for a generator alert:
