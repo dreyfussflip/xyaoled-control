@@ -100,7 +100,9 @@ def parse_glyphs(path, top):
 def parse_icons(path):
     """icons.txt: a name line, then rows of '.'/'#' (<=16), blank line between icons.
     Returns [(name, columns)], each icon vertically centred in 16 rows, 1 blank column after."""
-    icons, name, rows = [], None, []
+    icons, name, rows, colours = [], None, [], (0, 0)
+    NAMED = {"red": 0xFF0000, "green": 0x00FF00, "blue": 0x0040FF, "yellow": 0xFFC800, "white": 0xFFFFFF,
+             "cyan": 0x00FFFF, "magenta": 0xFF00FF, "orange": 0xFF6400}
 
     def flush():
         if name and rows:
@@ -113,7 +115,7 @@ def parse_icons(path):
                     if x < len(r) and r[x] == "#":
                         v |= 1 << (top + y)
                 cols.append(v)
-            icons.append((name, cols + [0]))
+            icons.append((name, cols + [0], colours))
 
     for line in open(path):
         line = line.rstrip("\n")
@@ -121,9 +123,12 @@ def parse_icons(path):
             continue
         if not line.strip():
             flush()
-            name, rows = None, []
+            name, rows, colours = None, [], (0, 0)
         elif name is None:
-            name = line.strip()
+            parts = line.split()
+            name = parts[0]
+            if len(parts) >= 3:
+                colours = (NAMED[parts[1]], NAMED[parts[2]])
         else:
             rows.append(line.strip())
     flush()
@@ -175,17 +180,18 @@ def main():
     # icons
     icons = parse_icons(os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons.txt"))
     ioff, o2, allcols, names = [], 0, [], []
-    for name, cols in icons:
+    for name, cols, _ in icons:
         names.append(name)
         ioff.append(o2)
         allcols += cols
         o2 += len(cols)
-    out.append("struct XyaoIcon {\n  const char *name;\n  uint16_t offset;\n  uint8_t width;\n};")
+    out.append("// top / bottom: fixed 0xRRGGBB colour for rows 0-7 / 8-15, or 0 = use the text colour")
+    out.append("struct XyaoIcon {\n  const char *name;\n  uint16_t offset;\n  uint8_t width;\n  uint32_t top, bottom;\n};")
     out.append(f"static const uint16_t XYAO_ICON_COLS[{max(1, o2)}] = {{" + ",".join("0x%04X" % v for v in allcols) + "};")
     out.append(f"static const int XYAO_ICON_COUNT = {len(icons)};")
     out.append("static const XyaoIcon XYAO_ICONS[] = {")
-    for (name, cols), off in zip(icons, ioff):
-        out.append(f'  {{"{name}", {off}, {len(cols)}}},')
+    for (name, cols, (top, bot)), off in zip(icons, ioff):
+        out.append(f'  {{"{name}", {off}, {len(cols)}, 0x{top:06X}, 0x{bot:06X}}},')
     out.append("};")
     print("icons:", ", ".join(names))
     out.append(f"static const int XYAO_FONT_COUNT = {len(FONTS)};")

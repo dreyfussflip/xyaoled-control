@@ -260,8 +260,13 @@ struct Col {
 
 // Renders one line. ":name:" inserts an icon; ":name!:" blinks it (in the "off" phase it is drawn as
 // "<name>_off" if that icon exists, otherwise blank). "[colour]" changes the colour from there on.
+static Rgb rgb_of(uint32_t v) { return {(uint8_t) (v >> 16), (uint8_t) ((v >> 8) & 0xFF), (uint8_t) (v & 0xFF)}; }
+
+// Renders one line. ":name:" inserts an icon; ":name!:" blinks it (in odd phases it is drawn as "<name>_off" if
+// that icon exists, otherwise blank); if only "<name>_1", "<name>_2", ... exist the icon is animated (frame =
+// phase). "[colour]" changes the colour from there on. Icons with fixed colours keep them.
 static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt, bool allow_icons, int text_shift,
-                                    bool off_phase, bool *has_blink, Rgb *colour, bool *has_colour) {
+                                    int phase, bool *animated, Rgb *colour, bool *has_colour) {
   std::vector<Col> out;
   for (size_t p = 0; p < text.size(); p++) {
     size_t tag = parse_colour_tag(text, p, colour);
@@ -278,16 +283,26 @@ static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt
         if (blink)
           name.pop_back();
         const XyaoIcon *icon = find_icon(name);
+        const XyaoIcon *draw = icon;
+        if (icon == nullptr && (icon = find_icon(name + "_1")) != nullptr) {
+          int n = 1;
+          while (n < 16 && find_icon(name + "_" + std::to_string(n + 1)) != nullptr)
+            n++;
+          *animated = true;
+          draw = find_icon(name + "_" + std::to_string(phase % n + 1));
+        }
         if (icon != nullptr) {
-          const XyaoIcon *draw = icon;
           if (blink) {
-            *has_blink = true;
-            if (off_phase)
+            *animated = true;
+            if (phase % 2)
               draw = find_icon(name + "_off");
           }
+          Rgb top = icon->top ? rgb_of(icon->top) : *colour, bot = icon->bottom ? rgb_of(icon->bottom) : *colour;
+          if (icon->top || icon->bottom)
+            *has_colour = true;
           for (int k = 0; k < icon->width; k++)
-            out.push_back({(uint16_t) (draw != nullptr && k < draw->width ? XYAO_ICON_COLS[draw->offset + k] : 0),
-                           *colour, *colour});
+            out.push_back({(uint16_t) (draw != nullptr && k < draw->width ? XYAO_ICON_COLS[draw->offset + k] : 0), top,
+                           bot});
           p = q;
           continue;
         }
@@ -305,7 +320,7 @@ static std::vector<Col> render_line(const std::string &text, const XyaoFont *fnt
 
 // Renders one page: one line, or two lines ('|' / newline) in the 8-row "small" font.
 static std::vector<Col> render_page(const std::string &text, const XyaoFont *base, Rgb colour, const char **used,
-                                    bool off_phase, bool *has_blink, bool *has_colour) {
+                                    int phase, bool *animated, bool *has_colour) {
   std::vector<std::string> lines(1);
   for (char ch : text) {
     if ((ch == '|' || ch == '\n') && lines.size() < 2)
@@ -322,7 +337,7 @@ static std::vector<Col> render_page(const std::string &text, const XyaoFont *bas
   for (size_t li = 0; li < lines.size(); li++) {
     // icons are 16 rows tall, so they only appear on single-line pages; small text is centred vertically
     int shift = two ? (li == 0 ? 0 : 8) : (small ? 4 : 0);
-    auto cols = render_line(lines[li], fnt, !two, shift, off_phase, has_blink, &colour, has_colour);
+    auto cols = render_line(lines[li], fnt, !two, shift, phase, animated, &colour, has_colour);
     w = std::max(w, cols.size());
     rendered.push_back(cols);
   }
@@ -464,8 +479,10 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
   const Rgb base_colour{r, g, b};
   const XyaoFont *base = find_font(font.empty() ? this->default_font_ : font);
   struct Page {
-    std::vector<Col> on, off;
-    bool blink;
+    std::string text;
+    const XyaoFont *fnt;
+    std::vector<Col> on;
+    bool blink;  // animated: blinking or multi-frame icons
   };
   // '~' splits the message into pages the panel shows in turn
   std::vector<std::string> parts(1);
@@ -479,29 +496,24 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
   std::vector<Page> pages;
   bool any_blink = false, any_colour = false;
   for (auto &part : parts) {
-    Page pg{{}, {}, false};
-    const XyaoFont *fnt = base;
-    pg.on = render_page(part, fnt, base_colour, &used, false, &pg.blink, &any_colour);
+    Page pg{part, base, {}, false};
+    pg.on = render_page(part, base, base_colour, &used, 0, &pg.blink, &any_colour);
     // auto-fit: if a page is wider than the panel, try narrower fonts before clipping / scrolling
     if ((int) pg.on.size() > W && mode != 2) {
       for (const char *alt : {"narrow", "tall", "small"}) {
         const char *u2 = used;
         bool bl = false, co = false;
-        auto p2 = render_page(part, find_font(alt), base_colour, &u2, false, &bl, &co);
+        auto p2 = render_page(part, find_font(alt), base_colour, &u2, 0, &bl, &co);
         if ((int) p2.size() <= W) {
           pg.on = p2;
           used = u2;
-          fnt = find_font(alt);
+          pg.fnt = find_font(alt);
           break;
         }
       }
     }
-    if (pg.blink) {
-      bool d1 = false, d2 = false;
-      const char *u3 = used;
-      pg.off = render_page(part, fnt, base_colour, &u3, true, &d1, &d2);
+    if (pg.blink)
       any_blink = true;
-    }
     pages.push_back(pg);
   }
   bool flash = effect == "flash";
@@ -548,11 +560,13 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     std::vector<uint8_t> blank((size_t) W * PANEL_H, 0);
     for (auto &pg : pages) {
       if (pg.blink) {
-        int cycles = std::max(1, page_cs / (2 * blink_cs));
-        auto on = raster(pg.on), off = raster(pg.off);
-        for (int k = 0; k < cycles; k++) {
-          frames.push_back({on, blink_cs});
-          frames.push_back({off, blink_cs});
+        // re-render the page for each time step; icons pick their blink phase / animation frame
+        int steps = std::max(2, page_cs / blink_cs);
+        steps += steps % 2;
+        for (int k = 0; k < steps; k++) {
+          bool d1 = false, d2 = false;
+          const char *u3 = used;
+          frames.push_back({raster(render_page(pg.text, pg.fnt, base_colour, &u3, k, &d1, &d2)), blink_cs});
         }
       } else if (flash) {
         frames.push_back({raster(pg.on), 50});
