@@ -32,7 +32,7 @@ api:
         blue: int
         mode: int    # 0 auto (scroll when wider than the panel), 1 static, 2 scroll
         speed: int   # 0 = default; higher = slower
-        font: string    # mono, sans, bold, italic, narrow, large ("" = default)
+        font: string    # mono, sans, bold, italic, narrow, large, small ("" = default)
         effect: string  # none, flash (flash applies to text that fits without scrolling)
       then:
         - lambda: 'id(panel).display_text(message, red, green, blue, mode, speed, font, effect);'
@@ -82,7 +82,7 @@ select:
     id: panel_font
     optimistic: true
     restore_value: true
-    options: [mono, sans, bold, italic, narrow, large]
+    options: [mono, sans, bold, italic, narrow, large, small]
     initial_option: mono
 
   - platform: template

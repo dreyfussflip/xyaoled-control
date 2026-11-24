@@ -204,6 +204,25 @@ void XyaoLED::send_mono_(const std::vector<uint16_t> &cols, int n, uint8_t r, ui
   this->seq_++;
 }
 
+static const XyaoFont *find_font(const std::string &name) {
+  for (int i = 0; i < XYAO_FONT_COUNT; i++)
+    if (name == XYAO_FONTS[i].name)
+      return &XYAO_FONTS[i];
+  return &XYAO_FONTS[0];
+}
+
+static std::vector<uint16_t> render_line(const std::string &text, const XyaoFont *fnt) {
+  std::vector<uint16_t> out;
+  for (unsigned char ch : text) {
+    if (ch < 32 || ch > 126)
+      ch = '?';
+    int i = ch - 32;
+    for (int k = 0; k < fnt->widths[i]; k++)
+      out.push_back(fnt->columns[fnt->offsets[i] + k]);
+  }
+  return out;
+}
+
 void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_t b, int mode, int speed,
                            const std::string &font, const std::string &effect) {
   if (!this->is_ready()) {
@@ -211,43 +230,55 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     return;
   }
   const int W = this->width_;
-  const std::string &fname = font.empty() ? this->default_font_ : font;
-  const XyaoFont *fnt = &XYAO_FONTS[0];
-  for (int i = 0; i < XYAO_FONT_COUNT; i++)
-    if (fname == XYAO_FONTS[i].name)
-      fnt = &XYAO_FONTS[i];
-  std::vector<uint16_t> txt;
-  for (unsigned char ch : text) {
-    if (ch < 32 || ch > 126)
-      ch = '?';
-    int i = ch - 32;
-    for (int k = 0; k < fnt->widths[i]; k++)
-      txt.push_back(fnt->columns[fnt->offsets[i] + k]);
+  // '|' or a newline starts a second line; two-line messages always use the 8-row "small" font
+  std::vector<std::string> lines(1);
+  for (char ch : text) {
+    if ((ch == '|' || ch == '\n') && lines.size() < 2)
+      lines.emplace_back();
+    else if (ch != '\r')
+      lines.back() += ch;
+  }
+  bool two = lines.size() == 2;
+  const XyaoFont *fnt = find_font(two ? std::string("small") : (font.empty() ? this->default_font_ : font));
+  bool small = std::string(fnt->name) == "small";
+  std::vector<std::vector<uint16_t>> rendered;
+  size_t w = 0;
+  for (size_t li = 0; li < lines.size(); li++) {
+    auto cols = render_line(lines[li], fnt);
+    int shift = two ? (li == 0 ? 0 : 8) : (small ? 4 : 0);  // small single line is centred vertically
+    for (auto &v : cols)
+      v = (uint16_t) (v << shift);
+    w = std::max(w, cols.size());
+    rendered.push_back(cols);
   }
   bool flash = effect == "flash";
-  bool scroll = mode == 2 || (mode == 0 && (int) txt.size() > W);
+  bool scroll = mode == 2 || (mode == 0 && (int) w > W);
   int dur = speed > 0 ? std::min(speed, 255) : (flash && !scroll ? 0x14 : 0x3C);
   this->clear();  // otherwise each image is appended to the panel's looping playlist
   if (!scroll) {
     std::vector<uint16_t> cols(W, 0);
-    int pad = (int) txt.size() < W ? (W - (int) txt.size()) / 2 : 0;
-    for (size_t k = 0; k < txt.size() && pad + (int) k < W; k++)
-      cols[pad + k] = txt[k];
+    for (auto &line : rendered) {  // centre each line on its own
+      int pad = (int) line.size() < W ? (W - (int) line.size()) / 2 : 0;
+      for (size_t k = 0; k < line.size() && pad + (int) k < W; k++)
+        cols[pad + k] |= line[k];
+    }
     if (flash)
       cols.resize((size_t) W * 2, 0);  // frame 2 is blank: the panel alternates text / blank
     this->send_mono_(cols, flash ? 2 : 1, r, g, b, false, dur);
   } else {
     // a wide strip the panel scrolls itself: 2px lead + text + one screen of blank trail
-    std::vector<uint16_t> cols(2, 0);
-    cols.insert(cols.end(), txt.begin(), txt.end());
+    std::vector<uint16_t> cols(2 + w, 0);
+    for (auto &line : rendered)
+      for (size_t k = 0; k < line.size(); k++)
+        cols[2 + k] |= line[k];
     int n = std::min(MAX_FRAMES, ((int) cols.size() + W + W - 1) / W);
     cols.resize((size_t) n * W, 0);
     std::vector<uint16_t> black(W, 0);
     this->send_mono_(black, 1, 0, 0, 0, false, 0x05);  // hides the previous screen scrolling out
     this->send_mono_(cols, n, r, g, b, true, dur);
   }
-  ESP_LOGI(TAG, "text '%s' (%s, %d px, %s%s)", text.c_str(), fnt->name, (int) txt.size(), scroll ? "scroll" : "static",
-           flash && !scroll ? ", flash" : "");
+  ESP_LOGI(TAG, "text '%s' (%s, %d line%s, %d px, %s%s)", text.c_str(), fnt->name, (int) lines.size(),
+           two ? "s" : "", (int) w, scroll ? "scroll" : "static", flash && !scroll ? ", flash" : "");
 }
 
 }  // namespace xyao_led

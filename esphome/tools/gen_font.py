@@ -25,6 +25,8 @@ FONTS = [
     ("italic", "DejaVuSans-Oblique.ttf", 12, 12),
     ("narrow", "DejaVuSansCondensed.ttf", 12, 12),
     ("large", "DejaVuSans-Bold.ttf", 16, 15),
+    # 8-row font for two-line messages: glyphs use rows 0..7 (shifted down 8 for line 2)
+    ("small", "DejaVuSansMono.ttf", 8, 6),
 ]
 
 

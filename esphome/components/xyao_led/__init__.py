@@ -9,7 +9,7 @@ CODEOWNERS = ["@dreyfussflip"]
 
 CONF_INIT_FRAME = "init_frame"
 CONF_FONT = "font"
-FONTS = ["mono", "sans", "bold", "italic", "narrow", "large"]
+FONTS = ["mono", "sans", "bold", "italic", "narrow", "large", "small"]
 # Same sample handshake as xyaoled/core.py (DEFAULT_INIT_HEX). Capture your own if the panel ignores it.
 DEFAULT_INIT = "99aa002eff881f00000001001a06030b1a2f030100a1a9df647ff700000000"
 
