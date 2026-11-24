@@ -1,0 +1,81 @@
+# ESPHome component (ESP32 bridge)
+
+`esphome/components/xyao_led` turns a cheap ESP32 into a dedicated, always-connected
+controller for one XYAO-LED panel. Home Assistant talks to the ESP32 over Wi-Fi (native
+ESPHome API); the ESP32 holds the Bluetooth link to the panel. Text is rendered **on the
+ESP32**, so no PC or Python is needed once it is flashed.
+
+Use it when the panel is out of range of your Home Assistant Bluetooth, when you want many
+panels around a site (one ESP32 per location), or when you want it to keep working without
+the HACS integration.
+
+Tested on a classic ESP32 (ESP32-D0WD-V3, `esp32dev`, ESP-IDF framework, ESPHome 2026.7)
+with a **32x16** panel. 64x16 is supported via `width: 64` (same frame format as the Python
+library) but has not been tested on hardware with this component yet.
+
+## What you get in Home Assistant
+
+| Entity / action | What it does |
+|---|---|
+| `text.<name>_message` | Type a message — short text is centred, longer text scrolls |
+| `select.<name>_colour` | Colour used by the message box |
+| `number.<name>_brightness` | 0–100 |
+| `switch.<name>_power` | Panel on/off, state read back from the panel |
+| `button.<name>_clear` | Clear screen + on-device playlist |
+| `esphome.<name>_display_text` | `message`, `red`, `green`, `blue`, `mode` (0 auto, 1 static, 2 scroll), `speed` |
+| `esphome.<name>_send_raw` | Raw command frames in hex, `\|`-separated |
+
+Example automation:
+
+```yaml
+action: esphome.xyao_main_hall_display_text
+data:
+  message: "Supper in 10 minutes"
+  red: 255
+  green: 200
+  blue: 0
+  mode: 0
+  speed: 0
+```
+
+## Setup
+
+1. Find the panel's Bluetooth address (it advertises as `XyaoLED_xxxx`; nRF Connect or the
+   ESPHome BLE tracker log will show it). Close the phone app — the panel accepts only one
+   connection at a time.
+2. Copy [`esphome/xyaoled-display.yaml`](../esphome/xyaoled-display.yaml), set `name`,
+   `panel_mac` and `panel_width`, and add `wifi_ssid` / `wifi_password` to `secrets.yaml`.
+3. Flash it (`esphome run xyaoled-display.yaml`) and adopt the device in Home Assistant.
+
+On every (re)connect the component enables notifications on `AE02`, waits for the CCCD
+write, then sends the init handshake. If your panel never reports a status in the log
+(`status: 32x16 power=ON`) and ignores commands, capture your own `TYPE=0x0000` frame
+(see the main README) and set `init_frame:`.
+
+## Notes
+
+- **One BLE connection per panel.** While the ESP32 is connected the phone app cannot connect.
+- **Many panels.** ESPHome allows up to 9 BLE connections per ESP32 (`esp32_ble: max_connections`),
+  but with Wi-Fi active 3–4 is a realistic maximum, and BLE range (≈10–30 m indoors) usually
+  decides it. For panels spread over a site, use one ESP32 per location and give each a
+  descriptive `name`.
+- **Playlist.** Each image is appended to the panel's looping playlist, so `display_text`
+  always clears first.
+- **Font.** `xyao_font.h` is generated from DejaVu Sans Mono 12 px by
+  [`esphome/tools/gen_font.py`](../esphome/tools/gen_font.py) (ASCII 32–126; other characters
+  render as `?`). Re-run it with `--font`/`--size` to change the look.
+- **Don't use the same ESP32 as a Bluetooth proxy for this panel** if Home Assistant's own
+  `xyaoled` integration is also installed — both would compete for the single connection.
+
+## 32x16 panels
+
+The 32x16 variant uses the same `99 aa 00 2e ff 88` command frames, handshake and image
+format as the 64x16 panel. Differences seen so far:
+
+- Status notify after the handshake starts `88 ff 00 03 01 01 20 00 10 00 04 …`
+  (type `00 03` instead of `00 05`, width `0x20` = 32). Byte 11 is power: `01` on, `00` off.
+- 1-bit bitmaps are 16 rows × 4 bytes = 64 bytes per frame (LSB = leftmost pixel), and the
+  payload's `SUBLEN` is `12 + n*64`.
+- Other notifies observed while uploading: `88 ff 03 00 …`, `88 ff 03 01 …` (per-command acks)
+  and `88 ff 05 01 …` (image complete), as on the 64x16 panel.
+- The bundled sample handshake was accepted by a 32x16 panel unchanged.
