@@ -50,6 +50,8 @@ data:
 | `Genny\|ON 31%` | Two lines (`\|` or a newline) in the 8-row `small` font |
 | `:battery: 71%` | Built-in icon, see list below |
 | `:warning: GO~:battery: 23%` | Pages (`~`): the panel alternates them itself (`speed` sets the page time) |
+| `:warning:[green]GO` | `[colour]` switches colour from that point on (`red`, `green`, `blue`, `yellow`, `white`, `cyan`, `magenta`, `orange` or `[#rrggbb]`) |
+| `:battery_low!:23%` | `!` makes an icon blink at 2 Hz; the off phase uses the icon `<name>_off` if there is one (e.g. the battery's bottom bar blinks) |
 
 If a page is wider than the panel, it is re-rendered in `narrow`, then `tall`, then `small`, before it is
 clipped (single pages scroll instead, unless they fit in a narrower font). `mode: 2` forces
@@ -57,7 +59,19 @@ scrolling in the chosen font.
 
 Icons (`esphome/tools/icons.txt`, edit and re-run `gen_font.py` to add your own):
 `battery`, `bolt`, `drop`, `food`, `shower`, `sun`, `moon`, `bell`, `warning`, `check`,
-`cross`, `heart`, `clock`, `wifi`, `temp`, `home`, `gate`.
+`cross`, `heart`, `clock`, `wifi`, `temp`, `home`, `gate`, `battery_empty`, `battery_low`.
+
+Plain messages are sent as a 1-bit image (one colour). Messages that use `[colour]` tags or
+blinking icons are rendered on the ESP32 as a full-colour **GIF animation** (per-pixel colour,
+exact frame timing; up to 7 colours per message). Example, as used for a generator alert:
+
+```
+:warning:[green]GO~:battery_low!:[white]23%
+```
+
+shows a red warning sign with a green "GO", then a red empty battery whose bottom bar blinks
+twice a second beside a white "23%" (with `red: 255` as the base colour). In GIF mode `speed`
+is the page time in tenths of a second (default 25 = 2.5 s).
 
 ## Setup
 
