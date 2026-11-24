@@ -66,7 +66,8 @@ Icons (`esphome/tools/icons.txt`, edit and re-run `gen_font.py` to add your own)
 Animated icons (colour, play in GIF mode): `rain` (cloud + falling drops), `uv` (blazing sun),
 `dinnerbell` (swinging bell), `coffee` (steaming cup), `pot` (steaming pot), `shower` (water
 falling from a shower head), `santa` (winks), `candle` (flickering flame), `sleigh` (reindeer and
-sleigh riding across the whole panel, 15 frames). An icon is animated
+sleigh riding across the whole panel, 15 frames), `fireworks` (rocket, burst, sparkles), `water`
+(a glass filling up). An icon is animated
 when `icons.txt` has numbered frames `name_1`, `name_2`, … instead of `name`; a colour pair after
 the name (e.g. `rain_1 white blue`) fixes the icon's top/bottom-half colours.
 
