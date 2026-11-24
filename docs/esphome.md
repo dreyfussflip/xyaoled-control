@@ -19,10 +19,12 @@ library) but has not been tested on hardware with this component yet.
 |---|---|
 | `text.<name>_message` | Type a message — short text is centred, longer text scrolls |
 | `select.<name>_colour` | Colour used by the message box |
+| `select.<name>_font` | `mono`, `sans`, `bold`, `italic`, `narrow`, `large` |
+| `select.<name>_effect` | `none` or `flash` (flash works for text that fits without scrolling) |
 | `number.<name>_brightness` | 0–100 |
 | `switch.<name>_power` | Panel on/off, state read back from the panel |
 | `button.<name>_clear` | Clear screen + on-device playlist |
-| `esphome.<name>_display_text` | `message`, `red`, `green`, `blue`, `mode` (0 auto, 1 static, 2 scroll), `speed` |
+| `esphome.<name>_display_text` | `message`, `red`, `green`, `blue`, `mode` (0 auto, 1 static, 2 scroll), `speed`, `font`, `effect` |
 | `esphome.<name>_send_raw` | Raw command frames in hex, `\|`-separated |
 
 Example automation:
@@ -36,6 +38,8 @@ data:
   blue: 0
   mode: 0
   speed: 0
+  font: bold
+  effect: flash
 ```
 
 ## Setup
@@ -61,9 +65,12 @@ write, then sends the init handshake. If your panel never reports a status in th
   descriptive `name`.
 - **Playlist.** Each image is appended to the panel's looping playlist, so `display_text`
   always clears first.
-- **Font.** `xyao_font.h` is generated from DejaVu Sans Mono 12 px by
-  [`esphome/tools/gen_font.py`](../esphome/tools/gen_font.py) (ASCII 32–126; other characters
-  render as `?`). Re-run it with `--font`/`--size` to change the look.
+- **Fonts.** `xyao_font.h` holds six bitmap fonts generated from the DejaVu family by
+  [`esphome/tools/gen_font.py`](../esphome/tools/gen_font.py): `mono`, `sans` (proportional, fits
+  more), `bold`, `italic`, `narrow` and `large` (16 px, ~2 characters on a 32-wide panel).
+  ASCII 32–126; other characters render as `?`. Set the default with `font:` on `xyao_led`.
+- **Flash.** `effect: flash` sends a two-frame animation (text, blank) that the panel loops
+  itself; `speed` sets the blink rate (default 20).
 - **Don't use the same ESP32 as a Bluetooth proxy for this panel** if Home Assistant's own
   `xyaoled` integration is also installed — both would compete for the single connection.
 
