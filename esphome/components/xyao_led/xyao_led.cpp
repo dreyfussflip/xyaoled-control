@@ -340,7 +340,8 @@ static std::vector<Col> render_page(const std::string &text, const XyaoFont *bas
   size_t w = 0;
   for (size_t li = 0; li < lines.size(); li++) {
     // icons are 16 rows tall, so they only appear on single-line pages; small text is centred vertically
-    int shift = two ? (li == 0 ? 0 : 8) : (small ? 4 : 0);
+    // line 2 starts on row 9, leaving row 8 blank so line 1's descenders (g, y, p) never touch it
+    int shift = two ? (li == 0 ? 0 : 9) : (small ? 4 : 0);
     auto cols = render_line(lines[li], fnt, !two, shift, phase, animated, &colour, has_colour);
     w = std::max(w, cols.size());
     rendered.push_back(cols);
