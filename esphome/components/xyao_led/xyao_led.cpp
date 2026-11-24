@@ -157,14 +157,26 @@ void XyaoLED::write_raw_(const std::vector<uint8_t> &data) {
   size_t chunk = std::min<size_t>(this->mtu_ > 3 ? this->mtu_ - 3 : 20, 512);
   for (size_t i = 0; i < data.size(); i += chunk) {
     size_t n = std::min(chunk, data.size() - i);
-    esp_err_t err = esp_ble_gattc_write_char((esp_gatt_if_t) this->parent()->get_gattc_if(),
-                                             this->parent()->get_conn_id(), this->ae01_handle_, n,
-                                             (uint8_t *) data.data() + i, ESP_GATT_WRITE_TYPE_NO_RSP,
-                                             ESP_GATT_AUTH_REQ_NONE);
-    if (err != ESP_OK)
-      ESP_LOGW(TAG, "write failed at %u: %s", (unsigned) i, esp_err_to_name(err));
+    esp_err_t err = ESP_FAIL;
+    // write-without-response has no flow control: if the BLE stack's queue is full, wait and retry
+    for (int attempt = 0; attempt < 8; attempt++) {
+      if (this->node_state != espbt::ClientState::ESTABLISHED || this->ae01_handle_ == 0) {
+        ESP_LOGW(TAG, "connection lost during transfer (%u of %u bytes sent)", (unsigned) i, (unsigned) data.size());
+        return;
+      }
+      err = esp_ble_gattc_write_char((esp_gatt_if_t) this->parent()->get_gattc_if(), this->parent()->get_conn_id(),
+                                     this->ae01_handle_, n, (uint8_t *) data.data() + i, ESP_GATT_WRITE_TYPE_NO_RSP,
+                                     ESP_GATT_AUTH_REQ_NONE);
+      if (err == ESP_OK)
+        break;
+      delay(60 * (attempt + 1));
+    }
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "write failed at %u: %s - giving up", (unsigned) i, esp_err_to_name(err));
+      return;
+    }
     if (i + n < data.size())
-      delay(20);  // let the BLE stack drain; the panel reassembles by the frame's length field
+      delay(45);  // pace the transfer; the panel reassembles by the frame's length field
   }
 }
 
