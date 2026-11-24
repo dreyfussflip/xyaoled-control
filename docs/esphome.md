@@ -58,11 +58,12 @@ clipped (single pages scroll instead, unless they fit in a narrower font). `mode
 scrolling in the chosen font.
 
 Icons (`esphome/tools/icons.txt`, edit and re-run `gen_font.py` to add your own):
-`battery`, `bolt`, `drop`, `food`, `shower`, `sun`, `moon`, `bell`, `warning`, `check`,
+`battery`, `bolt`, `drop`, `food`, `sun`, `moon`, `bell`, `warning`, `check`,
 `cross`, `heart`, `clock`, `wifi`, `temp`, `home`, `gate`, `battery_empty`, `battery_low`.
 
 Animated icons (colour, play in GIF mode): `rain` (cloud + falling drops), `uv` (blazing sun),
-`dinnerbell` (swinging bell), `coffee` (steaming cup), `pot` (steaming pot). An icon is animated
+`dinnerbell` (swinging bell), `coffee` (steaming cup), `pot` (steaming pot), `shower` (water
+falling from a shower head). An icon is animated
 when `icons.txt` has numbered frames `name_1`, `name_2`, … instead of `name`; a colour pair after
 the name (e.g. `rain_1 white blue`) fixes the icon's top/bottom-half colours.
 
