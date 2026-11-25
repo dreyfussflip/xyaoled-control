@@ -68,6 +68,31 @@ void XyaoLED::enable_notify_(esp_gatt_if_t gattc_if) {
                                  ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
 }
 
+void XyaoLED::dump_gatt_(esp_gatt_if_t gattc_if, uint16_t conn_id) {
+  // lists every service and characteristic, so an unknown panel can be identified from the log
+  esp_gattc_service_elem_t svc[16];
+  uint16_t ns = 16;
+  if (esp_ble_gattc_get_service(gattc_if, conn_id, nullptr, svc, &ns, 0) != ESP_GATT_OK) return;
+  for (uint16_t i = 0; i < ns; i++) {
+    char su[40];
+    espbt::ESPBTUUID::from_uuid(svc[i].uuid).to_str(su);
+    ESP_LOGI(TAG, "service %s handles 0x%04X-0x%04X", su, svc[i].start_handle, svc[i].end_handle);
+    esp_gattc_char_elem_t ch[16];
+    uint16_t nc = 16;
+    if (esp_ble_gattc_get_all_char(gattc_if, conn_id, svc[i].start_handle, svc[i].end_handle, ch, &nc, 0) != ESP_GATT_OK)
+      continue;
+    for (uint16_t j = 0; j < nc; j++) {
+      char cu[40];
+      espbt::ESPBTUUID::from_uuid(ch[j].uuid).to_str(cu);
+      ESP_LOGI(TAG, "  char %s handle 0x%04X props 0x%02X%s%s%s%s", cu, ch[j].char_handle, ch[j].properties,
+               (ch[j].properties & ESP_GATT_CHAR_PROP_BIT_READ) ? " read" : "",
+               (ch[j].properties & ESP_GATT_CHAR_PROP_BIT_WRITE) ? " write" : "",
+               (ch[j].properties & ESP_GATT_CHAR_PROP_BIT_WRITE_NR) ? " write-nr" : "",
+               (ch[j].properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY) ? " notify" : "");
+    }
+  }
+}
+
 void XyaoLED::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                                   esp_ble_gattc_cb_param_t *param) {
   switch (event) {
@@ -75,7 +100,8 @@ void XyaoLED::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gatt
       auto *c1 = this->parent()->get_characteristic(SERVICE_AE00, CHAR_AE01);
       auto *c2 = this->parent()->get_characteristic(SERVICE_AE00, CHAR_AE02);
       if (c1 == nullptr) {
-        ESP_LOGE(TAG, "AE01 not found - is this an XYAO panel?");
+        ESP_LOGE(TAG, "AE01 not found - is this an XYAO panel? GATT table follows:");
+        this->dump_gatt_(gattc_if, param->search_cmpl.conn_id);
         break;
       }
       this->ae01_handle_ = c1->handle;
