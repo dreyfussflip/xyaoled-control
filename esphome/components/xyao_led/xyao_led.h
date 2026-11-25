@@ -77,6 +77,7 @@ class XyaoLED : public Component, public ble_client::BLEClientNode {
     int mode, speed;
   } last_;
   bool resend_pending_{false};
+  uint8_t index_{0};
   // the last message is also kept in flash, so it comes back after the ESP32 itself restarts
   struct Saved {
     char text[201];

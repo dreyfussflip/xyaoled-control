@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include "esphome/core/helpers.h"
+#include "esphome/core/application.h"
 
 namespace esphome {
 namespace xyao_led {
@@ -18,8 +19,14 @@ static const uint16_t CHAR_AE02 = 0xAE02;
 static const int PANEL_H = 16;
 static const int MAX_FRAMES = 77;  // one 0x0207 frame is capped at 10000 bytes
 
+// Several panels can hang off one ESP32: each gets an index (config order) for its own saved message and a
+// staggered resend after (re)connecting, so they never all transfer a GIF at the same moment.
+static uint8_t g_instances = 0;
+
 void XyaoLED::setup() {
-  this->pref_ = global_preferences->make_preference<Saved>(fnv1_hash("xyao_led_last"));
+  this->index_ = g_instances++;
+  this->pref_ = global_preferences->make_preference<Saved>(
+      this->index_ == 0 ? fnv1_hash("xyao_led_last") : fnv1_hash(str_sprintf("xyao_led_last_%u", this->index_)));
   Saved s{};
   if (this->pref_.load(&s) && s.valid == 1) {
     s.text[sizeof(s.text) - 1] = s.font[sizeof(s.font) - 1] = s.effect[sizeof(s.effect) - 1] = 0;
@@ -163,7 +170,7 @@ void XyaoLED::loop() {
     this->init_done_ = true;
     this->seq_ = 2;
     this->resend_pending_ = this->last_.valid;
-    this->init_at_ = millis() + 1500;
+    this->init_at_ = millis() + 1500 + this->index_ * 6000;
     return;
   }
   if (this->resend_pending_ && this->is_ready() && (int32_t) (millis() - this->init_at_) >= 0) {
@@ -194,12 +201,14 @@ void XyaoLED::write_raw_(const std::vector<uint8_t> &data) {
                                      ESP_GATT_AUTH_REQ_NONE);
       if (err == ESP_OK)
         break;
+      App.feed_wdt();
       delay(60 * (attempt + 1));
     }
     if (err != ESP_OK) {
       ESP_LOGW(TAG, "write failed at %u: %s - giving up", (unsigned) i, esp_err_to_name(err));
       return;
     }
+    App.feed_wdt();
     if (i + n < data.size())
       delay(45);  // pace the transfer; the panel reassembles by the frame's length field
   }
