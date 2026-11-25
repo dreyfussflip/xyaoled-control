@@ -222,6 +222,11 @@ void XyaoLED::loop() {
     if (!this->ipixel_) {
       ESP_LOGD(TAG, "sending init handshake");
       this->send_frames_hex(this->init_hex_);
+    } else {
+      // the iPixel app (and pypixelcolor) reads the device info first; some boards accept images only after it
+      // [08 00 01 80 hh mm ss lang] - the clock values only set the panel's own clock
+      ESP_LOGD(TAG, "[%u] requesting iPixel device info", this->index_);
+      this->write_raw_({0x08, 0x00, 0x01, 0x80, 12, 0, 0, 0x00});
     }
     this->init_done_ = true;
     this->seq_ = 2;
@@ -829,7 +834,10 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
   }
   // Several panels share one ESP32 (no PSRAM): building and sending a GIF needs ~25 KB. If another panel's
   // transfer still holds that memory, wait and retry rather than starve the Bluetooth stack.
-  if ((heap_caps_get_free_size(MALLOC_CAP_8BIT) < 40000 || !this->txq_.empty()) && this->busy_retries_ < 20) {
+  // largest free block matters, not the total: the heap fragments with three BLE links and Wi-Fi
+  if ((heap_caps_get_free_size(MALLOC_CAP_8BIT) < 40000 || heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 26000 ||
+       !this->txq_.empty()) &&
+      this->busy_retries_ < 20) {
     this->busy_retries_++;
     this->set_timeout("busy_retry", 1500, [this, text, r, g, b, mode, speed, font, effect]() {
       this->display_text(text, r, g, b, mode, speed, font, effect);
