@@ -102,6 +102,34 @@ void XyaoLED::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gatt
                                   esp_ble_gattc_cb_param_t *param) {
   switch (event) {
     case ESP_GATTC_SEARCH_CMPL_EVT: {
+      if (this->ipixel_) {
+        // iPixel Color: write FA02, notify FA03 (whatever service they sit in); no handshake
+        auto find = [&](uint16_t u) -> uint16_t {
+          esp_gattc_char_elem_t el;
+          uint16_t cnt = 1;
+          esp_bt_uuid_t uuid = espbt::ESPBTUUID::from_uint16(u).get_uuid();
+          if (esp_ble_gattc_get_char_by_uuid(gattc_if, param->search_cmpl.conn_id, 0x0001, 0xFFFF, uuid, &el, &cnt) ==
+                  ESP_GATT_OK && cnt > 0)
+            return el.char_handle;
+          return 0;
+        };
+        this->ae01_handle_ = find(0xFA02);
+        this->ae02_handle_ = find(0xFA03);
+        if (this->ae01_handle_ == 0) {
+          ESP_LOGE(TAG, "FA02 not found - is this an iPixel panel? GATT table follows:");
+          this->dump_gatt_(gattc_if, param->search_cmpl.conn_id);
+          break;
+        }
+        if (this->ae02_handle_ != 0) {
+          this->enable_notify_(gattc_if);
+        } else {
+          this->init_pending_ = true;
+          this->init_at_ = millis() + 300;
+        }
+        this->node_state = espbt::ClientState::ESTABLISHED;
+        ESP_LOGI(TAG, "connected, iPixel (FA02=0x%04X FA03=0x%04X)", this->ae01_handle_, this->ae02_handle_);
+        break;
+      }
       auto *c1 = this->parent()->get_characteristic(SERVICE_AE00, CHAR_AE01);
       auto *c2 = this->parent()->get_characteristic(SERVICE_AE00, CHAR_AE02);
       if (c1 == nullptr) {
@@ -167,8 +195,10 @@ void XyaoLED::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gatt
 void XyaoLED::loop() {
   if (this->init_pending_ && (int32_t) (millis() - this->init_at_) >= 0 && this->ae01_handle_ != 0) {
     this->init_pending_ = false;
-    ESP_LOGD(TAG, "sending init handshake");
-    this->send_frames_hex(this->init_hex_);
+    if (!this->ipixel_) {
+      ESP_LOGD(TAG, "sending init handshake");
+      this->send_frames_hex(this->init_hex_);
+    }
     this->init_done_ = true;
     this->seq_ = 2;
     this->resend_pending_ = this->last_.valid;
@@ -188,7 +218,7 @@ void XyaoLED::write_raw_(const std::vector<uint8_t> &data) {
     ESP_LOGW(TAG, "not connected; dropping %u bytes", (unsigned) data.size());
     return;
   }
-  size_t chunk = std::min<size_t>(this->mtu_ > 3 ? this->mtu_ - 3 : 20, 512);
+  size_t chunk = std::min<size_t>(this->mtu_ > 3 ? this->mtu_ - 3 : 20, this->ipixel_ ? 244 : 512);
   for (size_t i = 0; i < data.size(); i += chunk) {
     size_t n = std::min(chunk, data.size() - i);
     esp_err_t err = ESP_FAIL;
@@ -248,17 +278,29 @@ std::vector<uint8_t> XyaoLED::make_frame_(uint16_t type, const std::vector<uint8
 }
 
 void XyaoLED::set_power(bool on) {
+  if (this->ipixel_) {
+    this->write_raw_({0x05, 0x00, 0x07, 0x01, (uint8_t) (on ? 1 : 0)});
+    this->power_state_ = on;
+    this->have_state_ = true;
+    return;
+  }
   this->write_raw_(this->make_frame_(0x0011, {(uint8_t) (on ? 0x01 : 0x02), 0x01, 0x01}));
   this->seq_++;
 }
 
 void XyaoLED::set_brightness(int level) {
   level = std::max(0, std::min(100, level));
+  if (this->ipixel_) {
+    this->write_raw_({0x05, 0x00, 0x04, 0x80, (uint8_t) level});
+    return;
+  }
   this->write_raw_(this->make_frame_(0x0012, {0x01, (uint8_t) level}));
   this->seq_++;
 }
 
 void XyaoLED::clear() {
+  if (this->ipixel_)
+    return;  // a new iPixel image replaces the screen; its own "clear" wipes the panel's memory
   this->write_raw_(this->make_frame_(0x0005, {0x01, 0x01, 0x00, 0x00, 0x00, 0x00}));
   delay(300);  // clear sends no completion notify
 }
@@ -564,7 +606,51 @@ void XyaoLED::send_part_(uint16_t type, const std::vector<uint8_t> &hdr, const u
   this->write_raw_(f);
 }
 
+static uint32_t crc32_ieee(const uint8_t *d, size_t n) {
+  uint32_t c = 0xFFFFFFFF;
+  for (size_t i = 0; i < n; i++) {
+    c ^= d[i];
+    for (int k = 0; k < 8; k++)
+      c = (c >> 1) ^ (0xEDB88320 & (0 - (c & 1)));
+  }
+  return ~c;
+}
+
+// iPixel Color image upload (see lucagoc/pypixelcolor send_image): the file in 12 KB windows, each
+// [len u16 = 2 + rest] [03 gif | 02 png] 00 [00 first | 02 next] [file size u32] [crc32 u32] [02 gif | 00] [slot 0] data
+void XyaoLED::send_ipixel_file_(const std::vector<uint8_t> &file, bool gif) {
+  const size_t WIN = 12 * 1024;
+  uint32_t size = file.size(), crc = crc32_ieee(file.data(), file.size());
+  ESP_LOGD(TAG, "[%u] iPixel upload %u bytes, crc %08X", this->index_, (unsigned) size, (unsigned) crc);
+  for (size_t pos = 0, w = 0; pos < file.size(); pos += WIN, w++) {
+    size_t n = std::min(WIN, file.size() - pos);
+    std::vector<uint8_t> m;
+    m.reserve(15 + n);
+    size_t len = 2 + 13 + n;
+    m.insert(m.end(), {(uint8_t) (len & 0xFF), (uint8_t) (len >> 8), (uint8_t) (gif ? 0x03 : 0x02), 0x00,
+                       (uint8_t) (w == 0 ? 0x00 : 0x02)});
+    for (int k = 0; k < 4; k++)
+      m.push_back((size >> (8 * k)) & 0xFF);
+    for (int k = 0; k < 4; k++)
+      m.push_back((crc >> (8 * k)) & 0xFF);
+    m.insert(m.end(), {(uint8_t) (gif ? 0x02 : 0x00), 0x00});
+    m.insert(m.end(), file.begin() + pos, file.begin() + pos + n);
+    this->write_raw_(m);
+    if (pos + n < file.size()) {
+      // the panel acks each window on FA03; events reach us only between loop() calls, so just give it time
+      for (int t = 0; t < 15; t++) {
+        App.feed_wdt();
+        delay(100);
+      }
+    }
+  }
+}
+
 void XyaoLED::send_gif_(const std::vector<uint8_t> &gif, int frames) {
+  if (this->ipixel_) {
+    this->send_ipixel_file_(gif, true);
+    return;
+  }
   // small parts keep the peak heap use low (BLE + Wi-Fi leave little contiguous RAM)
   const size_t PART = 4000;
   ESP_LOGD(TAG, "send gif %u bytes, free heap %u, largest block %u", (unsigned) gif.size(),
@@ -664,7 +750,7 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
           break;
       }
       // a single animated page can't scroll, and pages never scroll: use the narrowest rendering
-      if ((int) best.size() <= W || pg.anim || parts.size() > 1) {
+      if ((int) best.size() <= W || pg.anim || parts.size() > 1 || this->ipixel_) {
         pg.on = best;
         pg.fnt = best_fnt;
         used = best_used;
@@ -676,7 +762,8 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
   }
   bool flash = effect == "flash";
   bool multi = pages.size() > 1;
-  bool scroll = !multi && !any_blink && (mode == 2 || (mode == 0 && (int) pages[0].on.size() > W));
+  // iPixel panels only take image files, so everything goes out as a GIF (no native scrolling yet)
+  bool scroll = !this->ipixel_ && !multi && !any_blink && (mode == 2 || (mode == 0 && (int) pages[0].on.size() > W));
   this->clear();  // otherwise each image is appended to the panel's looping playlist
 
   if (scroll) {
@@ -689,7 +776,7 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     std::vector<uint16_t> black(W, 0);
     this->send_mono_(black, 1, 0, 0, 0, false, 0x05);  // hides the previous screen scrolling out
     this->send_mono_(cols, n, r, g, b, true, speed > 0 ? std::min(speed, 255) : 0x3C);
-  } else if (any_blink || any_colour) {
+  } else if (any_blink || any_colour || this->ipixel_) {
     // full-colour GIF: per-pixel colour and exact timing (centiseconds)
     std::vector<Rgb> palette = {{0, 0, 0}};
     auto idx = [&](const Rgb &c) -> uint8_t {
@@ -758,7 +845,7 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     if (frames.size() > 254)
       frames.resize(254);
     // the panel does not show the final frame of an animation: append a 10 ms copy of it as a sacrificial frame
-    if (frames.size() > 1)
+    if (frames.size() > 1 && !this->ipixel_)
       frames.push_back({frames.back().first, 1});
     GifWriter gw(W, PANEL_H, palette);
     for (auto &f : frames)

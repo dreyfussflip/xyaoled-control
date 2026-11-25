@@ -1,4 +1,4 @@
-"""ESPHome external component for XYAO-LED BLE matrix panels (32x16 and 64x16)."""
+"""ESPHome external component for XYAO-LED and iPixel Color BLE matrix panels (32x16 and 64x16)."""
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import ble_client
@@ -9,6 +9,7 @@ CODEOWNERS = ["@dreyfussflip"]
 
 CONF_INIT_FRAME = "init_frame"
 CONF_FONT = "font"
+CONF_PROTOCOL = "protocol"
 FONTS = ["mono", "sans", "bold", "italic", "narrow", "large", "tall", "slim", "small"]
 # Same sample handshake as xyaoled/core.py (DEFAULT_INIT_HEX). Capture your own if the panel ignores it.
 DEFAULT_INIT = "99aa002eff881f00000001001a06030b1a2f030100a1a9df647ff700000000"
@@ -33,6 +34,8 @@ CONFIG_SCHEMA = cv.ensure_list(
             cv.Optional(CONF_WIDTH, default=32): cv.one_of(32, 64, int=True),
             cv.Optional(CONF_INIT_FRAME, default=DEFAULT_INIT): _hex,
             cv.Optional(CONF_FONT, default="mono"): cv.one_of(*FONTS, lower=True),
+            # xyao: XYAO-LED app panels (AE01/AE02 + handshake); ipixel: iPixel Color app panels (FA02/FA03, GIF files)
+            cv.Optional(CONF_PROTOCOL, default="xyao"): cv.one_of("xyao", "ipixel", lower=True),
         }
     )
     .extend(ble_client.BLE_CLIENT_SCHEMA)
@@ -48,3 +51,4 @@ async def to_code(config):
         cg.add(var.set_width(conf[CONF_WIDTH]))
         cg.add(var.set_init_hex(conf[CONF_INIT_FRAME]))
         cg.add(var.set_default_font(conf[CONF_FONT]))
+        cg.add(var.set_ipixel(conf[CONF_PROTOCOL] == "ipixel"))
