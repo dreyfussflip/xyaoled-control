@@ -98,6 +98,31 @@ write, then sends the init handshake. If your panel never reports a status in th
 (`status: 32x16 power=ON`) and ignores commands, capture your own `TYPE=0x0000` frame
 (see the main README) and set `init_frame:`.
 
+### iPixel Color panels
+
+Some identical-looking 32x16 boards (e.g. marked `TR231HII9-07 16*32`) ship with the **iPixel Color**
+app instead and advertise as `LED_BLE_xxxxxxxx`. They also expose `AE01`/`AE02` but ignore the XYAO
+handshake; set `protocol: ipixel` for them:
+
+```yaml
+xyao_led:
+  - id: panel2
+    ble_client_id: panel2_ble
+    protocol: ipixel
+```
+
+The component then writes GIF files to `FA02` (acknowledged writes, 244-byte chunks) and listens on
+`FA03`; no handshake is needed. Everything else — fonts, icons, colours, blinking, animations — works the
+same, because every message is rendered as a GIF. Power and brightness use the iPixel commands.
+Long single-colour text does not scroll on these panels yet (it is fitted with the narrowest font).
+Protocol details come from [lucagoc/pypixelcolor](https://github.com/lucagoc/pypixelcolor).
+
+### Several panels on one ESP32
+
+Add one `ble_client` and one `xyao_led` entry per panel (each with its own `id`) and an API action per
+panel calling `id(panelN).display_text(...)`. Each panel keeps its own last message and resends it after
+reconnecting, staggered 6 s apart.
+
 ## Notes
 
 - **One BLE connection per panel.** While the ESP32 is connected the phone app cannot connect.
