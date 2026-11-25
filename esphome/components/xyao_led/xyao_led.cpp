@@ -131,6 +131,8 @@ void XyaoLED::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gatt
       break;
     case ESP_GATTC_NOTIFY_EVT: {
       auto &n = param->notify;
+      if (n.handle == this->ae02_handle_)
+        ESP_LOGD(TAG, "[%u] notify %s", this->index_, format_hex_pretty(n.value, std::min<uint16_t>(n.value_len, 40)).c_str());
       if (n.handle != this->ae02_handle_ || n.value_len < 12)
         break;
       const uint8_t *v = n.value;
