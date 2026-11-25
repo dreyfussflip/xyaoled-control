@@ -81,6 +81,7 @@ class XyaoLED : public Component, public ble_client::BLEClientNode {
   bool resend_pending_{false};
   uint8_t index_{0};
   bool ipixel_{false};
+  uint8_t busy_retries_{0};
   void send_ipixel_file_(const std::vector<uint8_t> &file, bool gif);
   // iPixel transmit queue: sent from loop() one acknowledged chunk at a time, so nothing blocks
   struct TxMsg {

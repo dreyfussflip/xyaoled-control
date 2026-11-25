@@ -823,6 +823,16 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     ESP_LOGW(TAG, "display_text: panel not connected");
     return;
   }
+  // Several panels share one ESP32 (no PSRAM): building and sending a GIF needs ~25 KB. If another panel's
+  // transfer still holds that memory, wait and retry rather than starve the Bluetooth stack.
+  if ((heap_caps_get_free_size(MALLOC_CAP_8BIT) < 40000 || !this->txq_.empty()) && this->busy_retries_ < 20) {
+    this->busy_retries_++;
+    this->set_timeout("busy_retry", 1500, [this, text, r, g, b, mode, speed, font, effect]() {
+      this->display_text(text, r, g, b, mode, speed, font, effect);
+    });
+    return;
+  }
+  this->busy_retries_ = 0;
   this->last_.valid = true;
   this->last_.text = text;
   this->last_.font = font;
