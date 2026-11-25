@@ -6,6 +6,7 @@
 #include "xyao_font.h"
 #include <algorithm>
 #include <cstring>
+#include <unordered_map>
 #include "esphome/core/helpers.h"
 #include "esphome/core/application.h"
 
@@ -549,7 +550,9 @@ static std::vector<uint16_t> bits_of(const std::vector<Col> &cols) {
 // ---- minimal GIF89a encoder (8-colour palette, "uncompressed" LZW) ----
 class GifWriter {
  public:
-  GifWriter(int w, int h, const std::vector<Rgb> &palette) : w_(w), h_(h) {
+  // compact: full LZW compression and per-frame changed-area rectangles (iPixel panels). Otherwise the simple
+  // form the XYAO panels are known to accept: whole frames, 4-bit codes with a clear every 5 pixels.
+  GifWriter(int w, int h, const std::vector<Rgb> &palette, bool compact = false) : w_(w), h_(h), compact_(compact) {
     const char *sig = "GIF89a";
     out.insert(out.end(), sig, sig + 6);
     put16(w);
@@ -568,41 +571,42 @@ class GifWriter {
     out.insert(out.end(), loop, loop + sizeof(loop));
   }
   void frame(const std::vector<uint8_t> &px, int delay_cs) {
+    // disposal 1 (leave in place): a later frame only needs to cover what changed
     const uint8_t gce[] = {0x21, 0xF9, 0x04, 0x04, (uint8_t) (delay_cs & 0xFF), (uint8_t) (delay_cs >> 8), 0x00, 0x00};
     out.insert(out.end(), gce, gce + sizeof(gce));
+    int x0 = 0, y0 = 0, x1 = w_ - 1, y1 = h_ - 1;
+    if (this->compact_ && !this->prev_.empty()) {
+      x0 = w_;
+      y0 = h_;
+      x1 = -1;
+      y1 = -1;
+      for (int y = 0; y < h_; y++)
+        for (int x = 0; x < w_; x++)
+          if (px[y * w_ + x] != this->prev_[y * w_ + x]) {
+            x0 = std::min(x0, x);
+            x1 = std::max(x1, x);
+            y0 = std::min(y0, y);
+            y1 = std::max(y1, y);
+          }
+      if (x1 < 0)
+        x0 = x1 = y0 = y1 = 0;  // nothing changed: a 1-pixel frame just carries the delay
+    }
+    if (this->compact_)
+      this->prev_ = px;
+    int fw = x1 - x0 + 1, fh = y1 - y0 + 1;
+    std::vector<uint8_t> sub;
+    sub.reserve((size_t) fw * fh);
+    for (int y = y0; y <= y1; y++)
+      for (int x = x0; x <= x1; x++)
+        sub.push_back(px[y * w_ + x] & 7);
     out.push_back(0x2C);
-    put16(0);
-    put16(0);
-    put16(w_);
-    put16(h_);
+    put16(x0);
+    put16(y0);
+    put16(fw);
+    put16(fh);
     out.push_back(0x00);
     out.push_back(3);  // LZW minimum code size
-    // 4-bit codes: clear(8), end(9); emit a clear before the table would grow past 15
-    std::vector<uint8_t> data;
-    uint32_t acc = 0;
-    int nbits = 0;
-    auto emit = [&](uint8_t code) {
-      acc |= (uint32_t) code << nbits;
-      nbits += 4;
-      while (nbits >= 8) {
-        data.push_back(acc & 0xFF);
-        acc >>= 8;
-        nbits -= 8;
-      }
-    };
-    int since_clear = 0;
-    emit(8);
-    for (uint8_t p : px) {
-      if (since_clear == 5) {
-        emit(8);
-        since_clear = 0;
-      }
-      emit(p & 7);
-      since_clear++;
-    }
-    emit(9);
-    if (nbits > 0)
-      data.push_back(acc & 0xFF);
+    std::vector<uint8_t> data = this->compact_ ? lzw_(sub) : simple_(sub);
     for (size_t i = 0; i < data.size(); i += 255) {
       size_t n = std::min<size_t>(255, data.size() - i);
       out.push_back((uint8_t) n);
@@ -617,11 +621,83 @@ class GifWriter {
   std::vector<uint8_t> out;
 
  private:
+  struct Bits {
+    std::vector<uint8_t> data;
+    uint32_t acc{0};
+    int nbits{0};
+    void put(uint32_t code, int size) {
+      acc |= code << nbits;
+      nbits += size;
+      while (nbits >= 8) {
+        data.push_back(acc & 0xFF);
+        acc >>= 8;
+        nbits -= 8;
+      }
+    }
+    std::vector<uint8_t> done() {
+      if (nbits > 0)
+        data.push_back(acc & 0xFF);
+      return data;
+    }
+  };
+  static std::vector<uint8_t> simple_(const std::vector<uint8_t> &px) {
+    // 4-bit codes: clear(8), end(9); a clear before the table would grow past 15
+    Bits b;
+    int since_clear = 0;
+    b.put(8, 4);
+    for (uint8_t p : px) {
+      if (since_clear == 5) {
+        b.put(8, 4);
+        since_clear = 0;
+      }
+      b.put(p, 4);
+      since_clear++;
+    }
+    b.put(9, 4);
+    return b.done();
+  }
+  static std::vector<uint8_t> lzw_(const std::vector<uint8_t> &px) {
+    // standard GIF LZW (as in gif.h): min code size 3, codes up to 12 bits, clear when the table is full
+    const int min = 3, clear = 1 << min, eoi = clear + 1;
+    std::unordered_map<uint32_t, uint16_t> next;  // (code << 3 | pixel) -> extended code
+    Bits b;
+    int size = min + 1, max_code = eoi;
+    b.put(clear, size);
+    int cur = -1;
+    for (uint8_t p : px) {
+      if (cur < 0) {
+        cur = p;
+        continue;
+      }
+      auto it = next.find((uint32_t) cur << 3 | p);
+      if (it != next.end()) {
+        cur = it->second;
+        continue;
+      }
+      b.put(cur, size);
+      next[(uint32_t) cur << 3 | p] = (uint16_t) ++max_code;
+      if (max_code >= (1 << size))
+        size++;
+      if (max_code == 4095) {
+        b.put(clear, size);
+        next.clear();
+        size = min + 1;
+        max_code = eoi;
+      }
+      cur = p;
+    }
+    if (cur >= 0)
+      b.put(cur, size);
+    b.put(eoi, size);
+    return b.done();
+  }
   void put16(int v) {
     out.push_back(v & 0xFF);
     out.push_back((v >> 8) & 0xFF);
   }
   int w_, h_;
+  bool compact_;
+  std::vector<uint8_t> prev_;
 };
 
 void XyaoLED::send_part_(uint16_t type, const std::vector<uint8_t> &hdr, const uint8_t *data, size_t n) {
@@ -909,7 +985,7 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
     // the panel does not show the final frame of an animation: append a 10 ms copy of it as a sacrificial frame
     if (frames.size() > 1 && !this->ipixel_)
       frames.push_back({frames.back().first, 1});
-    GifWriter gw(W, PANEL_H, palette);
+    GifWriter gw(W, PANEL_H, palette, this->ipixel_);
     for (auto &f : frames)
       gw.frame(f.first, f.second);
     auto gif = gw.finish();
