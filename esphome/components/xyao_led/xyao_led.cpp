@@ -179,7 +179,28 @@ void XyaoLED::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gatt
       }
       break;
     }
+    case ESP_GATTC_WRITE_CHAR_EVT: {
+      if (!this->ipixel_ || !this->tx_pending_ || param->write.handle != this->ae01_handle_)
+        break;
+      this->tx_pending_ = false;
+      if (param->write.status != ESP_GATT_OK)
+        ESP_LOGW(TAG, "[%u] write status %d", this->index_, param->write.status);
+      if (this->txq_.empty())
+        break;
+      auto &msg = this->txq_.front();
+      size_t chunk = std::min<size_t>(this->mtu_ > 3 ? this->mtu_ - 3 : 20, 244);
+      this->tx_pos_ += std::min(chunk, msg.data.size() - this->tx_pos_);
+      if (this->tx_pos_ >= msg.data.size()) {
+        this->tx_next_at_ = millis() + msg.gap_after_ms;
+        this->txq_.pop_front();
+        this->tx_pos_ = 0;
+      }
+      break;
+    }
     case ESP_GATTC_DISCONNECT_EVT:
+      this->txq_.clear();
+      this->tx_pos_ = 0;
+      this->tx_pending_ = false;
       this->ae01_handle_ = 0;
       this->ae02_handle_ = 0;
       this->have_state_ = false;
@@ -193,6 +214,8 @@ void XyaoLED::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gatt
 }
 
 void XyaoLED::loop() {
+  if (this->ipixel_)
+    this->tx_pump_();
   if (this->init_pending_ && (int32_t) (millis() - this->init_at_) >= 0 && this->ae01_handle_ != 0) {
     this->init_pending_ = false;
     if (!this->ipixel_) {
@@ -216,6 +239,10 @@ void XyaoLED::loop() {
 void XyaoLED::write_raw_(const std::vector<uint8_t> &data) {
   if (this->node_state != espbt::ClientState::ESTABLISHED || this->ae01_handle_ == 0) {
     ESP_LOGW(TAG, "not connected; dropping %u bytes", (unsigned) data.size());
+    return;
+  }
+  if (this->ipixel_) {
+    this->txq_.push_back({data, 150});
     return;
   }
   size_t chunk = std::min<size_t>(this->mtu_ > 3 ? this->mtu_ - 3 : 20, this->ipixel_ ? 244 : 512);
@@ -625,6 +652,9 @@ void XyaoLED::send_ipixel_file_(const std::vector<uint8_t> &file, bool gif) {
   const size_t WIN = 12 * 1024;
   uint32_t size = file.size(), crc = crc32_ieee(file.data(), file.size());
   ESP_LOGD(TAG, "[%u] iPixel upload %u bytes, crc %08X", this->index_, (unsigned) size, (unsigned) crc);
+  // a new image replaces whatever is still waiting to go out (but not a window already half sent)
+  while (this->txq_.size() > (this->tx_pos_ > 0 ? 1u : 0u))
+    this->txq_.pop_back();
   for (size_t pos = 0, w = 0; pos < file.size(); pos += WIN, w++) {
     size_t n = std::min(WIN, file.size() - pos);
     std::vector<uint8_t> m;
@@ -638,15 +668,44 @@ void XyaoLED::send_ipixel_file_(const std::vector<uint8_t> &file, bool gif) {
       m.push_back((crc >> (8 * k)) & 0xFF);
     m.insert(m.end(), {(uint8_t) (gif ? 0x02 : 0x00), 0x00});
     m.insert(m.end(), file.begin() + pos, file.begin() + pos + n);
-    this->write_raw_(m);
-    if (pos + n < file.size()) {
-      // the panel acks each window on FA03; events reach us only between loop() calls, so just give it time
-      for (int t = 0; t < 15; t++) {
-        App.feed_wdt();
-        delay(100);
-      }
-    }
+    // the panel acks each window on FA03; give it time before the next window
+    this->txq_.push_back({std::move(m), (uint32_t) (pos + n < file.size() ? 1500 : 300)});
   }
+}
+
+void XyaoLED::tx_pump_() {
+  if (this->txq_.empty())
+    return;
+  if (this->node_state != espbt::ClientState::ESTABLISHED || this->ae01_handle_ == 0) {
+    this->txq_.clear();
+    this->tx_pos_ = 0;
+    this->tx_pending_ = false;
+    return;
+  }
+  uint32_t now = millis();
+  if (this->tx_pending_) {
+    if (now - this->tx_sent_at_ < 3000)
+      return;
+    ESP_LOGW(TAG, "[%u] write not acknowledged; dropping the message", this->index_);
+    this->txq_.pop_front();
+    this->tx_pos_ = 0;
+    this->tx_pending_ = false;
+    return;
+  }
+  if ((int32_t) (now - this->tx_next_at_) < 0)
+    return;
+  auto &msg = this->txq_.front();
+  size_t chunk = std::min<size_t>(this->mtu_ > 3 ? this->mtu_ - 3 : 20, 244);
+  size_t n = std::min(chunk, msg.data.size() - this->tx_pos_);
+  esp_err_t err = esp_ble_gattc_write_char((esp_gatt_if_t) this->parent()->get_gattc_if(), this->parent()->get_conn_id(),
+                                           this->ae01_handle_, n, msg.data.data() + this->tx_pos_,
+                                           ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
+  if (err != ESP_OK) {
+    this->tx_next_at_ = now + 50;  // stack busy: try again shortly
+    return;
+  }
+  this->tx_pending_ = true;
+  this->tx_sent_at_ = now;
 }
 
 void XyaoLED::send_gif_(const std::vector<uint8_t> &gif, int frames) {

@@ -6,6 +6,7 @@
 #include <esp_gattc_api.h>
 #include <string>
 #include <vector>
+#include <deque>
 
 namespace esphome {
 namespace xyao_led {
@@ -81,6 +82,17 @@ class XyaoLED : public Component, public ble_client::BLEClientNode {
   uint8_t index_{0};
   bool ipixel_{false};
   void send_ipixel_file_(const std::vector<uint8_t> &file, bool gif);
+  // iPixel transmit queue: sent from loop() one acknowledged chunk at a time, so nothing blocks
+  struct TxMsg {
+    std::vector<uint8_t> data;
+    uint32_t gap_after_ms;
+  };
+  std::deque<TxMsg> txq_;
+  size_t tx_pos_{0};
+  bool tx_pending_{false};
+  uint32_t tx_sent_at_{0};
+  uint32_t tx_next_at_{0};
+  void tx_pump_();
   // the last message is also kept in flash, so it comes back after the ESP32 itself restarts
   struct Saved {
     char text[201];
