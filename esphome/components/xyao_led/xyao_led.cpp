@@ -74,17 +74,15 @@ void XyaoLED::dump_gatt_(esp_gatt_if_t gattc_if, uint16_t conn_id) {
   uint16_t ns = 16;
   if (esp_ble_gattc_get_service(gattc_if, conn_id, nullptr, svc, &ns, 0) != ESP_GATT_OK) return;
   for (uint16_t i = 0; i < ns; i++) {
-    char su[40];
-    espbt::ESPBTUUID::from_uuid(svc[i].uuid).to_str(su);
-    ESP_LOGI(TAG, "service %s handles 0x%04X-0x%04X", su, svc[i].start_handle, svc[i].end_handle);
+    std::string su = espbt::ESPBTUUID::from_uuid(svc[i].uuid).to_string();
+    ESP_LOGI(TAG, "service %s handles 0x%04X-0x%04X", su.c_str(), svc[i].start_handle, svc[i].end_handle);
     esp_gattc_char_elem_t ch[16];
     uint16_t nc = 16;
     if (esp_ble_gattc_get_all_char(gattc_if, conn_id, svc[i].start_handle, svc[i].end_handle, ch, &nc, 0) != ESP_GATT_OK)
       continue;
     for (uint16_t j = 0; j < nc; j++) {
-      char cu[40];
-      espbt::ESPBTUUID::from_uuid(ch[j].uuid).to_str(cu);
-      ESP_LOGI(TAG, "  char %s handle 0x%04X props 0x%02X%s%s%s%s", cu, ch[j].char_handle, ch[j].properties,
+      std::string cu = espbt::ESPBTUUID::from_uuid(ch[j].uuid).to_string();
+      ESP_LOGI(TAG, "  char %s handle 0x%04X props 0x%02X%s%s%s%s", cu.c_str(), ch[j].char_handle, ch[j].properties,
                (ch[j].properties & ESP_GATT_CHAR_PROP_BIT_READ) ? " read" : "",
                (ch[j].properties & ESP_GATT_CHAR_PROP_BIT_WRITE) ? " write" : "",
                (ch[j].properties & ESP_GATT_CHAR_PROP_BIT_WRITE_NR) ? " write-nr" : "",
