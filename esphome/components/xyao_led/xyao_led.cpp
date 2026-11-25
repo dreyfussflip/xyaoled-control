@@ -5,6 +5,7 @@
 #include "esphome/core/hal.h"
 #include "xyao_font.h"
 #include <algorithm>
+#include <functional>
 #include <cstring>
 #include <unordered_map>
 #include "esphome/core/helpers.h"
@@ -958,66 +959,93 @@ void XyaoLED::display_text(const std::string &text, uint8_t r, uint8_t g, uint8_
             px[y * W + pad + k] = idx(y < 8 ? pg[k].top : pg[k].bot);
       return px;
     };
-    // build the frame list first so the palette is complete before the header is written
+    // Frames are generated twice instead of being stored (a long animation would need ~60 KB): pass 1 only
+    // completes the palette (raster() adds colours), pass 2 writes each frame straight into the GIF.
     const int page_cs = speed > 0 ? speed * 10 : 250;  // page time; speed is in tenths of a second
     const int blink_cs = 25;                           // 2 blinks per second
-    std::vector<std::pair<std::vector<uint8_t>, int>> frames;
     std::vector<uint8_t> blank((size_t) W * PANEL_H, 0);
-    for (auto &pg : pages) {
-      if (pg.anim) {
-        // re-render the page for each time step (icons pick their blink phase / animation frame); all steps are
-        // trimmed by the same amount so moving icons (e.g. the sleigh) keep their position on the panel
-        int steps = std::max(pg.anim, page_cs / blink_cs);
-        steps = ((steps + pg.anim - 1) / pg.anim) * pg.anim;
-        if (steps > 120)
-          steps = 120;
-        std::vector<std::vector<Col>> raw;
-        size_t len = 0;
-        for (int k = 0; k < steps; k++) {
-          int d1 = 0;
-          bool d2 = false;
-          const char *u3 = used;
-          raw.push_back(render_page(pg.text, pg.fnt, base_colour, &u3, k, &d1, &d2, false));
-          len = std::max(len, raw.back().size());
-        }
-        size_t lead = len, trail = len;
-        for (auto &fr : raw) {
-          fr.resize(len, Col{0, {0, 0, 0}, {0, 0, 0}});
-          size_t a = 0, b = 0;
-          while (a < len && fr[a].bits == 0)
-            a++;
-          while (b < len && fr[len - 1 - b].bits == 0)
-            b++;
-          lead = std::min(lead, a);
-          trail = std::min(trail, b);
-        }
-        for (auto &fr : raw) {
-          std::vector<Col> cut(fr.begin() + std::min(lead, len), fr.end() - std::min(trail, len - std::min(lead, len)));
-          frames.push_back({raster(cut), blink_cs});
-        }
-      } else if (flash) {
-        frames.push_back({raster(pg.on), 50});
-        frames.push_back({blank, 50});
-      } else {
-        frames.push_back({raster(pg.on), page_cs});
+    // per animated page: steps, and one trim for all its steps so moving icons (e.g. the sleigh) keep their place
+    struct Geo {
+      int steps;
+      size_t len, lead, trail;
+    };
+    std::vector<Geo> geo(pages.size(), Geo{0, 0, 0, 0});
+    auto step_cols = [&](const Page &pg, int k) {
+      int d1 = 0;
+      bool d2 = false;
+      const char *u3 = used;
+      return render_page(pg.text, pg.fnt, base_colour, &u3, k, &d1, &d2, false);
+    };
+    for (size_t pi = 0; pi < pages.size(); pi++) {
+      auto &pg = pages[pi];
+      if (!pg.anim)
+        continue;
+      Geo g{std::max(pg.anim, page_cs / blink_cs), 0, 0, 0};
+      g.steps = std::min(120, ((g.steps + pg.anim - 1) / pg.anim) * pg.anim);
+      for (int k = 0; k < g.steps; k++)
+        g.len = std::max(g.len, step_cols(pg, k).size());
+      g.lead = g.trail = g.len;
+      for (int k = 0; k < g.steps; k++) {
+        auto fr = step_cols(pg, k);
+        fr.resize(g.len, Col{0, {0, 0, 0}, {0, 0, 0}});
+        size_t x = 0, y = 0;
+        while (x < g.len && fr[x].bits == 0)
+          x++;
+        while (y < g.len && fr[g.len - 1 - y].bits == 0)
+          y++;
+        g.lead = std::min(g.lead, x);
+        g.trail = std::min(g.trail, y);
       }
+      geo[pi] = g;
     }
-    if (frames.size() > 254)
-      frames.resize(254);
-    // the panel does not show the final frame of an animation: append a 10 ms copy of it as a sacrificial frame
-    if (frames.size() > 1 && !this->ipixel_)
-      frames.push_back({frames.back().first, 1});
+    auto generate = [&](const std::function<void(const std::vector<uint8_t> &, int)> &emit) {
+      for (size_t pi = 0; pi < pages.size(); pi++) {
+        auto &pg = pages[pi];
+        if (pg.anim) {
+          const Geo &g = geo[pi];
+          size_t lead = std::min(g.lead, g.len), trail = std::min(g.trail, g.len - lead);
+          for (int k = 0; k < g.steps; k++) {
+            auto fr = step_cols(pg, k);
+            fr.resize(g.len, Col{0, {0, 0, 0}, {0, 0, 0}});
+            std::vector<Col> cut(fr.begin() + lead, fr.end() - trail);
+            emit(raster(cut), blink_cs);
+          }
+        } else if (flash) {
+          emit(raster(pg.on), 50);
+          emit(blank, 50);
+        } else {
+          emit(raster(pg.on), page_cs);
+        }
+      }
+    };
+    const int max_frames = this->ipixel_ ? 254 : 253;  // XYAO: room for the sacrificial frame
+    int nframes = 0;
+    generate([&](const std::vector<uint8_t> &, int) { nframes++; });  // pass 1: palette + frame count
+    nframes = std::min(nframes, max_frames);
+    // the XYAO panel does not show the final frame of an animation: a 10 ms copy of it is added as a sacrificial frame
+    bool sacrificial = nframes > 1 && !this->ipixel_;
     GifWriter gw(W, PANEL_H, palette, this->ipixel_);
-    for (auto &f : frames)
-      gw.frame(f.first, f.second);
+    int written = 0;
+    std::vector<uint8_t> last;
+    generate([&](const std::vector<uint8_t> &px, int cs) {  // pass 2: write
+      if (written >= nframes)
+        return;
+      gw.frame(px, cs);
+      if (sacrificial && ++written == nframes)
+        last = px;
+      else if (!sacrificial)
+        written++;
+    });
+    if (sacrificial)
+      gw.frame(last, 1);
+    int total = nframes + (sacrificial ? 1 : 0);
     auto gif = gw.finish();
     if (gif.size() > 0xFFFF) {
       ESP_LOGW(TAG, "GIF too large (%u bytes)", (unsigned) gif.size());
       return;
     }
-    this->send_gif_(gif, (int) frames.size());
-    ESP_LOGD(TAG, "gif %u bytes, %u frames, %u colours", (unsigned) gif.size(), (unsigned) frames.size(),
-             (unsigned) palette.size());
+    this->send_gif_(gif, total);
+    ESP_LOGD(TAG, "gif %u bytes, %d frames, %u colours", (unsigned) gif.size(), total, (unsigned) palette.size());
   } else {
     // one colour: 1-bit image, one frame per page (+ a blank frame after each when flashing)
     int per = flash ? 2 : 1;
