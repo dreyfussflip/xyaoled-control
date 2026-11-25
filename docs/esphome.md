@@ -119,6 +119,8 @@ Protocol details come from [lucagoc/pypixelcolor](https://github.com/lucagoc/pyp
 
 ### Several panels on one ESP32
 
+See [`esphome/xyaoled-multi.yaml`](../esphome/xyaoled-multi.yaml) for a complete example (one XYAO + two iPixel panels).
+
 Add one `ble_client` and one `xyao_led` entry per panel (each with its own `id`) and an API action per
 panel calling `id(panelN).display_text(...)`. Each panel keeps its own last message and resends it after
 reconnecting, staggered 6 s apart.
