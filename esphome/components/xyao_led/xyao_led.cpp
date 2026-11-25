@@ -229,7 +229,10 @@ void XyaoLED::write_raw_(const std::vector<uint8_t> &data) {
         return;
       }
       err = esp_ble_gattc_write_char((esp_gatt_if_t) this->parent()->get_gattc_if(), this->parent()->get_conn_id(),
-                                     this->ae01_handle_, n, (uint8_t *) data.data() + i, ESP_GATT_WRITE_TYPE_NO_RSP,
+                                     this->ae01_handle_, n, (uint8_t *) data.data() + i,
+                                     // iPixel firmware (like its app) wants acknowledged writes; some boards drop
+                                     // the link on unacknowledged ones
+                                     this->ipixel_ ? ESP_GATT_WRITE_TYPE_RSP : ESP_GATT_WRITE_TYPE_NO_RSP,
                                      ESP_GATT_AUTH_REQ_NONE);
       if (err == ESP_OK)
         break;
@@ -242,7 +245,7 @@ void XyaoLED::write_raw_(const std::vector<uint8_t> &data) {
     }
     App.feed_wdt();
     if (i + n < data.size())
-      delay(45);  // pace the transfer; the panel reassembles by the frame's length field
+      delay(this->ipixel_ ? 80 : 45);  // pace the transfer; the panel reassembles by the frame's length field
   }
 }
 
