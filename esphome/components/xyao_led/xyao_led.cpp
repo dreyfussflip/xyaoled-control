@@ -242,10 +242,7 @@ void XyaoLED::write_raw_(const std::vector<uint8_t> &data) {
     ESP_LOGW(TAG, "not connected; dropping %u bytes", (unsigned) data.size());
     return;
   }
-  if (this->ipixel_) {
-    this->txq_.push_back({data, 150});
-    return;
-  }
+
   size_t chunk = std::min<size_t>(this->mtu_ > 3 ? this->mtu_ - 3 : 20, this->ipixel_ ? 244 : 512);
   for (size_t i = 0; i < data.size(); i += chunk) {
     size_t n = std::min(chunk, data.size() - i);
@@ -744,8 +741,15 @@ void XyaoLED::send_ipixel_file_(const std::vector<uint8_t> &file, bool gif) {
       m.push_back((crc >> (8 * k)) & 0xFF);
     m.insert(m.end(), {(uint8_t) (gif ? 0x02 : 0x00), 0x00});
     m.insert(m.end(), file.begin() + pos, file.begin() + pos + n);
-    // the panel acks each window on FA03; give it time before the next window
-    this->txq_.push_back({std::move(m), (uint32_t) (pos + n < file.size() ? 1500 : 300)});
+    // compact GIFs are ~1 KB, so a direct (blocking) send of acknowledged 244-byte chunks is short; this is the
+    // pacing both iPixel boards accepted reliably
+    this->write_raw_(m);
+    if (pos + n < file.size()) {
+      for (int t = 0; t < 15; t++) {  // the panel acks each 12 KB window on FA03; give it time
+        App.feed_wdt();
+        delay(100);
+      }
+    }
   }
 }
 
